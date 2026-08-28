@@ -4,10 +4,10 @@ Keeps the Hevy-fetch -> map -> Excel-write pipeline in one place so the two
 front ends (server.py tools and cli.py commands) never drift apart.
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
-from . import column_mapper, excel_writer, hevy_client
+from . import analysis, column_mapper, excel_writer, hevy_client
 
 # Rows from this date onward were written by the tool; fix operates on them.
 FIX_CUTOFF = datetime(2026, 6, 14)
@@ -36,6 +36,25 @@ async def collect_new_rows(since_date: str = "") -> list[dict]:
 
 def append_new_rows(rows: list[dict]) -> int:
     return excel_writer.append_rows(rows)
+
+
+async def collect_calendar(n_weeks: int, skip_current: bool = False,
+                           today: Optional[date] = None) -> list[list[dict]]:
+    """The last `n_weeks` Mon-Sun weeks as a calendar grid. Read-only: it never
+    opens the spreadsheet.
+
+    `skip_current` drops the in-progress week without pulling an older one in
+    to replace it, so the grid holds one week fewer than asked for.
+    """
+    today = today or date.today()
+    if skip_current:
+        n_weeks -= 1
+        today -= timedelta(weeks=1)
+    mondays = analysis.week_starts(n_weeks, today)
+    # fetch_workouts_since is exclusive, so step back a day to keep the Monday.
+    since = datetime.combine(mondays[0], datetime.min.time()) - timedelta(days=1)
+    workouts = await hevy_client.fetch_workouts_since(since)
+    return analysis.build_calendar(workouts, n_weeks, today)
 
 
 async def collect_fix_changes(dry_run: bool) -> list:

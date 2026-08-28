@@ -62,3 +62,44 @@ def test_collect_fix_changes_dry_run_previews_without_writing(monkeypatch, tmp_b
     # dry run: sheet unchanged
     wb = openpyxl.load_workbook(tmp_book)
     assert wb["Træning"].cell(row=2, column=3).value == "Over"
+
+
+def test_collect_calendar_ends_on_the_week_containing_today(monkeypatch):
+    async def fake(since):
+        return []
+    monkeypatch.setattr(sync_core.hevy_client, "fetch_workouts_since", fake)
+
+    grid = asyncio.run(sync_core.collect_calendar(2, today=date(2026, 8, 28)))
+
+    assert [grid[0][0]["date"], grid[-1][-1]["date"]] == [
+        date(2026, 8, 17), date(2026, 8, 30)]
+
+
+def test_collect_calendar_skipping_the_current_week_drops_it(monkeypatch):
+    async def fake(since):
+        return []
+    monkeypatch.setattr(sync_core.hevy_client, "fetch_workouts_since", fake)
+
+    grid = asyncio.run(sync_core.collect_calendar(
+        5, skip_current=True, today=date(2026, 8, 28)))
+
+    # 5 asked for, the in-progress week removed and not replaced: 4 remain,
+    # ending on the last complete Sunday.
+    assert len(grid) == 4
+    assert [grid[0][0]["date"], grid[-1][-1]["date"]] == [
+        date(2026, 7, 27), date(2026, 8, 23)]
+
+
+def test_collect_calendar_fetches_from_the_first_monday_inclusive(monkeypatch):
+    seen = {}
+
+    async def fake(since):
+        seen["since"] = since
+        return []
+    monkeypatch.setattr(sync_core.hevy_client, "fetch_workouts_since", fake)
+
+    asyncio.run(sync_core.collect_calendar(2, today=date(2026, 8, 28)))
+
+    # fetch_workouts_since is exclusive by date, so the cutoff sits one day
+    # before the first Monday or that Monday's workouts would be lost.
+    assert seen["since"].date() == date(2026, 8, 16)

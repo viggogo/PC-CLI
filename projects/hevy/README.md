@@ -37,6 +37,8 @@ hevy sync             Show the same table, then ask before adding them.
 hevy sync -y          Add without asking.
 hevy fix              Show before → after for tool-written rows, then ask.
 hevy fix -y           Apply the corrections without asking.
+hevy --weeks N        Show the last N weeks of training as a calendar.
+hevy --weeks N -1     Same, but drop the current, unfinished week.
 hevy --help           Show usage. Also: hevy sync --help, etc.
 ```
 
@@ -46,6 +48,11 @@ Options:
 --since YYYY-MM-DD    (preview, sync) Override the start date.
                       Default = everything after your last Excel row.
 -y, --yes             (sync, fix) Skip the confirmation prompt.
+--weeks N             Whole number of weeks, 1–52. Required — there is no
+                      default. Reads the API only; never opens the workbook.
+-1                    (--weeks) Drop the current, unfinished week. Nothing
+                      older replaces it, so you get N-1 weeks. `--weeks 1 -1`
+                      is a usage error — it would leave nothing to show.
 ```
 
 **Close Excel before any command that writes** (`sync`, `fix`). Excel holds a lock
@@ -66,6 +73,28 @@ Typical run:
 
 Add 2 workout(s) to Excel? [y/N] y
 Added 2 row(s).
+```
+
+The calendar:
+
+```
+> hevy --weeks 2
+              Mon         Tue         Wed         Thu         Fri         Sat         Sun
+         +-----------+-----------+-----------+-----------+-----------+-----------+-----------+
+ Aug     | 17        | 18        | 19        | 20        | 21        | 22        | 23        |
+ 17-23   | skub      |           | ben       |           | over      |           |           |
+         | 4/6    AC |           | 6/6  Cent |           | 3/6    AC |           |           |
+         | 4210 kg   |           | 6090 kg   |           | 3820 kg   |           |           |
+         +-----------+-----------+-----------+-----------+-----------+-----------+-----------+
+ Aug     | 24        | 25        | 26        | 27        | 28        | 29        | 30        |
+ 24-30   |           | traek     |           | ben       |           |           | over      |
+         |           | 4/6    AC |           | 5/6    AC |           |           | 5/6  Tryg |
+         |           | 5100 kg   |           | 17340 kg  |           |           | 4650 kg   |
+         |           |           |           | cardio    |           |           |           |
+         |           |           |           | -         |           |           |           |
+         |           |           |           | 0 kg      |           |           |           |
+         +-----------+-----------+-----------+-----------+-----------+-----------+-----------+
+ 2 weeks: 3.0 training days/week, 3.6 hours/week
 ```
 
 Exit codes: `0` success, `1` runtime failure, `2` usage error.
@@ -115,6 +144,33 @@ keeps recalculating the way the hand-kept rows do:
 =IF(ISBLANK(Table4[[#This Row],[Date]]), " ", SUM(Dr:Gr)-IF(Er = 1, 1, 0))
 ```
 
+`analysis` builds the calendar behind `--weeks`. The window is always whole
+Mon–Sun weeks, the last of which is the week containing today — so days later
+this week show as empty cells rather than being cut off. Each day-cell carries
+the workout's **name** (the raw Hevy title, not the sheet's category), **rating**
+and **place** — both read through `column_mapper`, so the calendar can never
+disagree with `preview` — and **volume**, which is new here: `weight_kg × reps`
+summed over every set and printed without a thousands separator, since in a
+9-character cell a space reads as two numbers and a comma reads as a Danish
+decimal point. Bodyweight and timed sets carry no load and add nothing, so a
+pure cardio session reads `0 kg`.
+
+Ratings render on the sheet's **1–6** scale (`4/6`); a rating above 6 can only
+have come from an explicit `n/10` in the description, so that scale is kept as
+written. An unrated session shows `-`.
+
+The footer under the grid averages the window. **Training days per week** counts
+distinct days you trained, so a day with two sessions still counts once.
+**Hours per week** sums whole sessions, `end_time − start_time`, cardio included
+— time in the gym, not the sheet's cardio-adjusted `Time` column. Rest weeks stay
+in the denominator; dropping them would flatter the average. Since the current
+week is usually unfinished, it drags both figures down until the week fills in —
+`-1` removes it.
+
+Two sessions on one day stack inside the cell, and each week is only as tall as
+its own busiest day. Names longer than 9 characters are truncated to the cell
+width. `--weeks` never opens the workbook, so it works with Excel still open.
+
 `hevy fix` re-fetches and re-maps rows from **2026-06-14 onward**
 (`sync_core.FIX_CUTOFF`) and overwrites them, matched by date. That cutoff is the
 first day the tool wrote rows — earlier rows are hand-typed and are never touched.
@@ -140,7 +196,7 @@ claude mcp add hevy -- "C:\Users\viggo\Git Clone\PC-CLI\projects\hevy\.venv\Scri
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-27 tests, all offline — the Hevy API is stubbed and the Excel tests build a tiny
+80 tests, all offline — the Hevy API is stubbed and the Excel tests build a tiny
 throwaway workbook in a temp folder. **Nothing touches your real spreadsheet.**
 
 ## Origin

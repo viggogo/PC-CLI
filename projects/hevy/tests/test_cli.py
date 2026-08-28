@@ -101,6 +101,101 @@ def test_http_errors_exit_with_a_message_not_a_traceback(
     assert expected in str(exc.value)
 
 
+def _stub_calendar(monkeypatch, calls=None):
+    from hevy_mcp import analysis
+
+    async def fake(n_weeks, skip_current=False, today=None):
+        if calls is not None:
+            calls.append((n_weeks, skip_current))
+        return analysis.build_calendar([], n_weeks, date(2026, 8, 28))
+    monkeypatch.setattr(sync_core, "collect_calendar", fake)
+
+
+def test_weeks_prints_a_calendar(monkeypatch, capsys):
+    _stub_calendar(monkeypatch)
+
+    cli.main(["--weeks", "2"])
+
+    out = capsys.readouterr().out
+    assert "Mon" in out and "Sun" in out
+    assert "+-----------+" in out
+
+
+def test_weeks_passes_the_week_count_through(monkeypatch, capsys):
+    seen = []
+    _stub_calendar(monkeypatch, seen)
+
+    cli.main(["--weeks", "6"])
+
+    assert seen == [(6, False)]
+
+
+def test_minus_one_asks_for_the_current_week_to_be_dropped(monkeypatch, capsys):
+    seen = []
+    _stub_calendar(monkeypatch, seen)
+
+    cli.main(["--weeks", "5", "-1"])
+
+    assert seen == [(5, True)]
+
+
+def test_one_week_minus_the_current_one_leaves_nothing_to_show(monkeypatch):
+    _stub_calendar(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--weeks", "1", "-1"])
+
+    assert exc.value.code == 2
+
+
+def test_weeks_does_not_need_the_spreadsheet(monkeypatch, capsys):
+    monkeypatch.delenv("EXCEL_PATH", raising=False)
+    _stub_calendar(monkeypatch)
+
+    cli.main(["--weeks", "2"])
+
+    assert "Mon" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("weeks", ["0", "-1", "53"])
+def test_weeks_rejects_an_out_of_range_week_count(monkeypatch, weeks):
+    _stub_calendar(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--weeks", weeks])
+
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("argv", [["--weeks", "abc"], ["--weeks"]])
+def test_weeks_requires_an_integer(monkeypatch, argv):
+    _stub_calendar(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(argv)
+
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("flag", ["--week", "--wee", "--w"])
+def test_an_abbreviation_of_weeks_is_not_accepted(monkeypatch, flag):
+    # argparse resolves unambiguous prefixes by default; the flag is --weeks
+    # and nothing else, so a near miss must be told rather than guessed at.
+    _stub_calendar(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main([flag, "2"])
+
+    assert exc.value.code == 2
+
+
+def test_no_command_at_all_is_still_a_usage_error(monkeypatch):
+    with pytest.raises(SystemExit) as exc:
+        cli.main([])
+
+    assert exc.value.code == 2
+
+
 def test_locked_spreadsheet_exits_with_a_message(monkeypatch):
     async def boom(since):
         raise PermissionError(13, "in use")
