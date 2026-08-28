@@ -1,8 +1,17 @@
 """Read-only calendar view of recent training, for `hevy --analysis N`."""
 
+import os
 from datetime import date, datetime, timedelta
 
 from . import column_mapper
+
+# Hevy adds your bodyweight to a set's load only for movements that use 100% of
+# it, and their list is exactly these four. Everything else counts the logged
+# weight alone -- a weighted sit-up scores its plate and nothing more.
+_BODYWEIGHT_KEYWORDS = ("pull up", "chin up", "dip", "handstand push up")
+
+# "Bench Dip" matches "dip" but rests on a bench, so it carries no bodyweight.
+_NOT_BODYWEIGHT = ("bench dip",)
 
 
 def week_starts(n_weeks: int, today: date) -> list[date]:
@@ -15,13 +24,44 @@ def week_starts(n_weeks: int, today: date) -> list[date]:
             for n in range(n_weeks - 1, -1, -1)]
 
 
-def workout_volume(workout: dict) -> float:
-    """Total kg moved: weight x reps over every set. Bodyweight and timed sets
-    carry no load and add nothing."""
+def bodyweight_kg() -> float:
+    """Your bodyweight, for the exercises Hevy loads with it. The Hevy API has
+    no endpoint for it, so it comes from .env. Unset or unreadable means 0,
+    which leaves bodyweight out of the total rather than guessing a number."""
+    try:
+        return float(os.environ.get("HEVY_BODYWEIGHT_KG") or 0)
+    except ValueError:
+        return 0.0
+
+
+def _is_bodyweight_exercise(title: str) -> bool:
+    t = (title or "").lower()
+    if any(kw in t for kw in _NOT_BODYWEIGHT):
+        return False
+    return any(kw in t for kw in _BODYWEIGHT_KEYWORDS)
+
+
+def workout_volume(workout: dict, bodyweight: float = 0.0) -> float:
+    """Total kg moved, the way Hevy counts it: load x reps over every set,
+    warm-ups included.
+
+    Load is the logged weight, except on the four movements that lift all of
+    you -- pull-ups, chin-ups, dips, handstand push-ups -- where Hevy adds your
+    bodyweight to it. The API sends only the *added* plate for those, so
+    without this a bodyweight-only set scores zero and a pull day comes out
+    thousands of kg light. Assisted variants take the assistance off instead.
+    Timed and rep-only sets have no reps or no weight, so they add nothing.
+    """
     total = 0.0
     for ex in workout.get("exercises", []):
+        title = ex.get("title", "")
+        carries_bodyweight = _is_bodyweight_exercise(title)
+        assisted = carries_bodyweight and "assisted" in title.lower()
+        base = bodyweight if carries_bodyweight else 0.0
         for s in ex.get("sets", []):
-            total += (s.get("weight_kg") or 0) * (s.get("reps") or 0)
+            weight = s.get("weight_kg") or 0
+            load = max(0.0, base - weight) if assisted else base + weight
+            total += load * (s.get("reps") or 0)
     return total
 
 
@@ -38,7 +78,7 @@ def _session(workout: dict) -> dict:
     return {
         "name": workout.get("title") or "",
         "rating": row["Rating"],
-        "volume": workout_volume(workout),
+        "volume": workout_volume(workout, bodyweight_kg()),
         "place": row["Place"],
         # Whole session, cardio included: the summary measures time in the gym,
         # not the sheet's cardio-adjusted Time column.

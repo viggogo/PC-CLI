@@ -108,6 +108,13 @@ Read from `.env` in this folder, or from real environment variables (which win):
 | `HEVY_API_KEY` | your Hevy API key |
 | `EXCEL_PATH` | `C:\Users\viggo\OneDrive\Privat\Fitness\Træning.xlsx` |
 | `EXCEL_SHEET` | `Træning` (optional — this is the default) |
+| `HEVY_BODYWEIGHT_KG` | your bodyweight, e.g. `83` — `--weeks` needs it to match the app |
+
+`HEVY_BODYWEIGHT_KG` exists because Hevy counts pull-ups, chin-ups, dips and
+handstand push-ups as lifting your whole bodyweight, but the API sends only the
+plate you hung off yourself — and has no endpoint for bodyweight at all. Without
+it a pull day comes out thousands of kg short. Leave it unset and those sets
+count as their added weight alone.
 
 `.env` is git-ignored, so the key is never committed.
 
@@ -149,11 +156,23 @@ Mon–Sun weeks, the last of which is the week containing today — so days late
 this week show as empty cells rather than being cut off. Each day-cell carries
 the workout's **name** (the raw Hevy title, not the sheet's category), **rating**
 and **place** — both read through `column_mapper`, so the calendar can never
-disagree with `preview` — and **volume**, which is new here: `weight_kg × reps`
-summed over every set and printed without a thousands separator, since in a
-9-character cell a space reads as two numbers and a comma reads as a Danish
-decimal point. Bodyweight and timed sets carry no load and add nothing, so a
-pure cardio session reads `0 kg`.
+disagree with `preview` — and **volume**, which is new here. It is printed
+without a thousands separator, since in a 9-character cell a space reads as two
+numbers and a comma reads as a Danish decimal point.
+
+Volume follows Hevy's own definition, so the cell matches what the app shows on
+the workout: load × reps over every set, warm-ups included. Load is the logged
+weight, except on the four movements Hevy treats as lifting all of you — pull-up,
+chin-up, dip, handstand push-up — where `HEVY_BODYWEIGHT_KG` is added to it
+(subtracted, for an `(Assisted)` variant). Nothing else gets bodyweight: a
+weighted sit-up counts its plate alone, and `Bench Dip` is excluded by name
+despite the "dip". Timed and rep-only sets carry no load, so a pure cardio
+session still reads `0 kg`.
+
+One limitation: Hevy uses your bodyweight *as measured at the time of each
+workout*, while `.env` holds one current value. Over a 2–12 week window the drift
+is negligible, but volumes for much older workouts will read slightly off — and
+the API exposes no per-workout weights to fix that with.
 
 Ratings render on the sheet's **1–6** scale (`4/6`); a rating above 6 can only
 have come from an explicit `n/10` in the description, so that scale is kept as

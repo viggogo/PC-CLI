@@ -7,9 +7,9 @@ from hevy_mcp import analysis
 from .conftest import cardio_ex, strength_ex
 
 
-def _sets(*pairs):
+def _sets(*pairs, title="Squat (Barbell)"):
     """Build a strength exercise from (reps, weight_kg) pairs."""
-    return {"title": "Squat (Barbell)", "sets": [
+    return {"title": title, "sets": [
         {"reps": r, "weight_kg": w, "duration_seconds": None,
          "distance_meters": None} for r, w in pairs]}
 
@@ -45,6 +45,65 @@ def test_workout_without_exercises_has_zero_volume(make_workout):
     w = make_workout(exercises=[])
 
     assert analysis.workout_volume(w) == 0
+
+
+# --- bodyweight in volume ---------------------------------------------------
+# Hevy loads pull-ups, chin-ups, dips and handstand push-ups with your
+# bodyweight. The API sends only the added plate, so these are the sets that
+# used to come out far too low.
+
+def test_a_weighted_pull_up_adds_bodyweight_to_the_plate(make_workout):
+    w = make_workout(exercises=[_sets((12, 15), title="Pull Up (Weighted)")])
+
+    assert analysis.workout_volume(w, 83) == (83 + 15) * 12
+
+
+def test_a_pull_up_without_plate_still_moves_bodyweight(make_workout):
+    # Logged as weight 0 -- the old formula scored the set at nothing.
+    w = make_workout(exercises=[_sets((12, 0), title="Pull Up (Weighted)")])
+
+    assert analysis.workout_volume(w, 83) == 996
+
+
+def test_an_assisted_pull_up_takes_the_assistance_off(make_workout):
+    w = make_workout(exercises=[_sets((10, 10), title="Pull Up (Assisted)")])
+
+    assert analysis.workout_volume(w, 83) == (83 - 10) * 10
+
+
+def test_assistance_beyond_bodyweight_never_goes_negative(make_workout):
+    w = make_workout(exercises=[_sets((10, 200), title="Pull Up (Assisted)")])
+
+    assert analysis.workout_volume(w, 83) == 0
+
+
+def test_a_weighted_sit_up_counts_the_plate_alone(make_workout):
+    # Hevy adds bodyweight only for the four movements that use all of it;
+    # a sit-up is weighted bodyweight but is not one of them.
+    w = make_workout(exercises=[_sets((20, 10), title="Sit Up (Weighted)")])
+
+    assert analysis.workout_volume(w, 83) == 200
+
+
+def test_a_bench_dip_carries_no_bodyweight_despite_the_name(make_workout):
+    w = make_workout(exercises=[_sets((15, None), title="Bench Dip")])
+
+    assert analysis.workout_volume(w, 83) == 0
+
+
+def test_warmup_sets_count_toward_volume(make_workout):
+    # Confirmed against the app: Hevy's Warm-up Sets setting is on.
+    ex = _sets((10, 40), (12, 60))
+    ex["sets"][0]["type"] = "warmup"
+    w = make_workout(exercises=[ex])
+
+    assert analysis.workout_volume(w, 83) == 400 + 720
+
+
+def test_without_a_configured_bodyweight_nothing_is_added(make_workout):
+    w = make_workout(exercises=[_sets((12, 15), title="Pull Up (Weighted)")])
+
+    assert analysis.workout_volume(w) == 180
 
 
 # --- week_starts ------------------------------------------------------------
