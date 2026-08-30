@@ -27,15 +27,16 @@ COMMENT_COL_AFTER = 5   # E
 
 
 def comment_rows(ws, col: int) -> list[int]:
-    """Populated rows in `col`, searched to a bound derived from the data.
+    """Every populated row in `col`, exactly.
 
-    The comments include headings above the data and remarks beside it, and
-    they are sparse, so this walks a fixed window rather than stopping at the
-    first blank.
+    Enumerates ws._cells rather than walking a row window: the comments are
+    sparse and sit both above and beside the data, so any window is a guess,
+    and a comment outside it would be silently left behind by a migration
+    that only runs once. This also avoids ws.cell(), which CREATES empty
+    cells as a side effect of reading them.
     """
-    _, next_row = sheet.dates_and_next_row(ws)
-    return [r for r in range(1, next_row + sheet.BLANK_RUN)
-            if ws.cell(r, col).value is not None]
+    return sorted(row for (row, column), cell in ws._cells.items()
+                  if column == col and cell.value is not None)
 
 
 def move_comments(ws) -> int:
@@ -45,12 +46,24 @@ def move_comments(ws) -> int:
     translate=True would rewrite the counter's INDEX(A:A,COUNTA(A:A)) into
     INDEX(B:B,COUNTA(B:B)), and even with translate=False it would not
     rebuild the ArrayFormula's own ref.
+
+    Two guards, because this runs once against an irreplaceable file and
+    must fail loudly rather than silently mangle it:
+      - a populated destination cell stops the move before it overwrites
+        anything;
+      - a non-empty source column after the loop means comment_rows missed
+        something, and that is raised rather than swallowed.
     """
     rows = comment_rows(ws, COMMENT_COL_BEFORE)
 
     for row in rows:
         src = ws.cell(row, COMMENT_COL_BEFORE)
         dst = ws.cell(row, COMMENT_COL_AFTER)
+
+        if dst.value is not None:
+            raise RuntimeError(
+                f"kolonne E har allerede en værdi i række {row}: "
+                f"{dst.value!r} -- flytning afbrudt for ikke at overskrive")
 
         value = src.value
         if isinstance(value, ArrayFormula):
@@ -67,10 +80,23 @@ def move_comments(ws) -> int:
         # "Normal" is openpyxl's built-in default and clears both.
         src.style = "Normal"
 
-    before = ws.cell(1, COMMENT_COL_BEFORE).column_letter
-    after = ws.cell(1, COMMENT_COL_AFTER).column_letter
-    if before in ws.column_dimensions:
-        ws.column_dimensions[after].width = ws.column_dimensions[before].width
-        del ws.column_dimensions[before]
+    leftover = comment_rows(ws, COMMENT_COL_BEFORE)
+    if leftover:
+        raise RuntimeError(
+            f"kolonne D er ikke tom efter flytningen: rækker {leftover}")
+
+    before_letter = ws.cell(1, COMMENT_COL_BEFORE).column_letter
+    after_letter = ws.cell(1, COMMENT_COL_AFTER).column_letter
+    if before_letter in ws.column_dimensions:
+        src_dim = ws.column_dimensions[before_letter]
+        dst_dim = ws.column_dimensions[after_letter]
+        # Width, visibility and outline grouping travel with the comments.
+        # Not `style`: that is an index into the workbook's shared style
+        # table, and copying it across columns is riskier than it is worth.
+        dst_dim.width = src_dim.width
+        dst_dim.hidden = src_dim.hidden
+        dst_dim.outlineLevel = src_dim.outlineLevel
+        dst_dim.bestFit = src_dim.bestFit
+        del ws.column_dimensions[before_letter]
 
     return len(rows)
