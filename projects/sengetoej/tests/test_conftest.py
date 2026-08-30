@@ -12,6 +12,10 @@ def test_pre_migration_book_reproduces_the_traps(pre_migration_book):
     assert table.ref == f"A1:B{TABLE_BOTTOM}"
     assert [c.name for c in table.tableColumns] == ["Date", "Diff"]
 
+    # The autoFilter is just as over-wide as the table ref, like the real sheet.
+    assert table.autoFilter is not None
+    assert table.autoFilter.ref == f"A1:B{TABLE_BOTTOM}"
+
     # Diff formulas continue past the last date (row 4).
     assert ws["B40"].value is not None
     assert ws["A40"].value is None
@@ -34,6 +38,11 @@ def test_post_migration_book_is_the_shape_migration_should_produce(post_migratio
 
     assert table.ref == f"A1:C{TABLE_BOTTOM}"
     assert [c.name for c in table.tableColumns] == ["Date", "Diff", "cli"]
+
+    # The autoFilter is just as over-wide as the table ref, like the real sheet.
+    assert table.autoFilter is not None
+    assert table.autoFilter.ref == f"A1:C{TABLE_BOTTOM}"
+
     assert ws["C1"].value == "cli"
     assert ws["D1"].value is None
     assert ws["E1"].value == "Dage siden sidste skift"

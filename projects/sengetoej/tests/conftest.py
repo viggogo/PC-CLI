@@ -16,6 +16,7 @@ import openpyxl
 import pytest
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils.cell import range_boundaries
+from openpyxl.worksheet.filters import AutoFilter
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.worksheet.table import Table, TableColumn, TableStyleInfo
 
@@ -68,12 +69,18 @@ def _add_table(ws, ref: str, names: list[str]):
     # file is invalid, so build them from the actual header cells within
     # `ref` -- which keeps the assert below a real consistency check between
     # the worksheet's header row and the names this fixture expects, not a
-    # tautology.
+    # tautology. Setting tableColumns explicitly has a second consequence:
+    # it suppresses openpyxl's save-time table initialisation, which is also
+    # what synthesises the autoFilter -- so without setting one ourselves the
+    # table would silently end up with autoFilter = None, losing a trap the
+    # real Table2 has (its autoFilter spans the same over-wide ref as the
+    # table itself).
     min_col, min_row, max_col, _ = range_boundaries(ref)
     table.tableColumns = [
         TableColumn(id=i, name=ws.cell(min_row, col).value)
         for i, col in enumerate(range(min_col, max_col + 1), start=1)
     ]
+    table.autoFilter = AutoFilter(ref=ref)
     ws.add_table(table)
     assert [c.name for c in table.tableColumns] == names, (
         [c.name for c in table.tableColumns], names)
