@@ -79,10 +79,14 @@ def test_backup_copies_the_file_beside_the_original(pre_migration_book):
 
 
 def test_main_is_a_no_op_when_already_migrated(post_migration_book, monkeypatch, capsys):
+    before_bytes = post_migration_book.read_bytes()
+
     monkeypatch.setenv("EXCEL_PATH", str(post_migration_book))
     monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
     assert migrate.main([]) == 0
     assert "allerede" in capsys.readouterr().out.lower()
+    # A true no-op: nothing on disk moved, byte for byte.
+    assert post_migration_book.read_bytes() == before_bytes
 
 
 def test_main_aborts_when_column_c_holds_something_else(pre_migration_book, monkeypatch, capsys):
@@ -108,6 +112,8 @@ def test_main_aborts_when_column_e_is_occupied(pre_migration_book, monkeypatch, 
 
 
 def test_main_declined_changes_nothing(pre_migration_book, monkeypatch):
+    before_bytes = pre_migration_book.read_bytes()
+
     monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
     monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
     monkeypatch.setattr("builtins.input", lambda _: "n")
@@ -116,9 +122,13 @@ def test_main_declined_changes_nothing(pre_migration_book, monkeypatch):
     ws = openpyxl.load_workbook(pre_migration_book)[SHEET]
     assert ws["C1"].value is None
     assert ws["D1"].value == "Dage siden sidste skift"
+    # Declining must leave the workbook byte-identical -- no backup, no save.
+    assert pre_migration_book.read_bytes() == before_bytes
 
 
 def test_main_accepted_applies_both_jobs_and_backs_up(pre_migration_book, monkeypatch, capsys):
+    before_bytes = pre_migration_book.read_bytes()
+
     monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
     monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
     monkeypatch.setattr("builtins.input", lambda _: "y")
@@ -131,6 +141,9 @@ def test_main_accepted_applies_both_jobs_and_backs_up(pre_migration_book, monkey
     assert ws["D1"].value is None
     backups = list(pre_migration_book.parent.glob("pre.*.bak.xlsx"))
     assert len(backups) == 1
+    # The backup must hold the PRE-migration state -- taken before any
+    # modification, not a copy of the now-migrated file.
+    assert backups[0].read_bytes() == before_bytes
 
 
 def test_main_yes_flag_skips_the_prompt(pre_migration_book, monkeypatch):
