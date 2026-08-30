@@ -89,11 +89,19 @@ def _add_table(ws, ref: str, names: list[str]):
 
 @pytest.fixture
 def pre_migration_book(tmp_path):
-    """Two-column Table2, comments in D, C empty. The state before migrate.py."""
+    """Two-column Table2, comments in D, C empty. The state before migrate.py.
+
+    Also mirrors a real fact about the live workbook: E2 already exists in
+    the sheet XML as a style-only cell (some earlier formatting operation
+    touched it) with no value. comment_rows() must treat it as unoccupied,
+    and the "E is not empty" guard in main()/_blocked must not fire on it --
+    see test_e_guard_does_not_fire_on_a_style_only_cell.
+    """
     path = tmp_path / "pre.xlsx"
     wb = openpyxl.Workbook()
     ws = _base_sheet(wb)
     _write_comments(ws, 4)
+    ws.cell(2, 5).font = Font(italic=True)
     _add_table(ws, f"A1:B{TABLE_BOTTOM}", ["Date", "Diff"])
     wb.save(path)
     return path

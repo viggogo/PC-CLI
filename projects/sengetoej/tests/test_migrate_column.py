@@ -6,6 +6,26 @@ from sengetoej import migrate, sheet
 from .conftest import SHEET, TABLE_BOTTOM
 
 
+def _spy_on_save(monkeypatch):
+    """Track every call to sheet.save without changing its behaviour.
+
+    A read_bytes() comparison alone is NOT reliable here: openpyxl's output
+    only differs from an unmodified re-save once docProps/core.xml's
+    dcterms:modified timestamp (second resolution) ticks over, so a fast
+    test run can re-save the file and still see identical bytes. Call
+    tracking is deterministic regardless of timing.
+    """
+    calls = []
+    real_save = sheet.save
+
+    def spy(wb, path):
+        calls.append(path)
+        return real_save(wb, path)
+
+    monkeypatch.setattr(sheet, "save", spy)
+    return calls
+
+
 def test_add_cli_column_writes_the_header(pre_migration_book):
     wb, ws = sheet.open_for_write(pre_migration_book, SHEET)
     migrate.add_cli_column(ws)
@@ -80,12 +100,14 @@ def test_backup_copies_the_file_beside_the_original(pre_migration_book):
 
 def test_main_is_a_no_op_when_already_migrated(post_migration_book, monkeypatch, capsys):
     before_bytes = post_migration_book.read_bytes()
+    calls = _spy_on_save(monkeypatch)
 
     monkeypatch.setenv("EXCEL_PATH", str(post_migration_book))
     monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
     assert migrate.main([]) == 0
     assert "allerede" in capsys.readouterr().out.lower()
-    # A true no-op: nothing on disk moved, byte for byte.
+    # A true no-op: sheet.save is never called, and nothing on disk moved.
+    assert calls == []
     assert post_migration_book.read_bytes() == before_bytes
 
 
@@ -93,26 +115,44 @@ def test_main_aborts_when_column_c_holds_something_else(pre_migration_book, monk
     wb, ws = sheet.open_for_write(pre_migration_book, SHEET)
     ws["C1"] = "noget andet"
     sheet.save(wb, pre_migration_book)
+    before_bytes = pre_migration_book.read_bytes()
+    calls = _spy_on_save(monkeypatch)
 
     monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
     monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
     assert migrate.main([]) == 1
     assert "C1" in capsys.readouterr().err
+    # This guard fires BEFORE backup() runs -- a regression that saved here
+    # would overwrite the original with no backup in existence. sheet.save
+    # must never be called on this path (checked directly, not only via
+    # bytes: an unmodified re-save can be byte-identical to the original
+    # within the same wall-clock second, which would let this slip through
+    # a bytes-only check).
+    assert calls == []
+    assert pre_migration_book.read_bytes() == before_bytes
 
 
 def test_main_aborts_when_column_e_is_occupied(pre_migration_book, monkeypatch, capsys):
     wb, ws = sheet.open_for_write(pre_migration_book, SHEET)
     ws["E9"] = "i vejen"
     sheet.save(wb, pre_migration_book)
+    before_bytes = pre_migration_book.read_bytes()
+    calls = _spy_on_save(monkeypatch)
 
     monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
     monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
     assert migrate.main([]) == 1
     assert "E" in capsys.readouterr().err
+    # Same guard, same property, same reason for the call-spy over a
+    # bytes-only check: it runs before backup(), so a regression that saved
+    # here would destroy the original with nothing to restore it from.
+    assert calls == []
+    assert pre_migration_book.read_bytes() == before_bytes
 
 
 def test_main_declined_changes_nothing(pre_migration_book, monkeypatch):
     before_bytes = pre_migration_book.read_bytes()
+    calls = _spy_on_save(monkeypatch)
 
     monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
     monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
@@ -123,17 +163,23 @@ def test_main_declined_changes_nothing(pre_migration_book, monkeypatch):
     assert ws["C1"].value is None
     assert ws["D1"].value == "Dage siden sidste skift"
     # Declining must leave the workbook byte-identical -- no backup, no save.
+    assert calls == []
     assert pre_migration_book.read_bytes() == before_bytes
 
 
 def test_main_accepted_applies_both_jobs_and_backs_up(pre_migration_book, monkeypatch, capsys):
     before_bytes = pre_migration_book.read_bytes()
+    calls = _spy_on_save(monkeypatch)
 
     monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
     monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
     monkeypatch.setattr("builtins.input", lambda _: "y")
 
     assert migrate.main([]) == 0
+
+    # Exactly one save, against the real path -- proves the earlier abort
+    # tests' calls == [] is pinning something real and not vacuously true.
+    assert calls == [pre_migration_book]
 
     ws = openpyxl.load_workbook(pre_migration_book)[SHEET]
     assert ws["C1"].value == "cli"
@@ -185,3 +231,105 @@ def test_main_leaves_the_file_untouched_when_move_comments_raises_mid_loop(
     assert migrate.main([]) == 1
     assert capsys.readouterr().err.strip() != ""
     assert pre_migration_book.read_bytes() == before_bytes
+
+
+def test_main_only_adds_cli_column_when_comments_already_moved(
+        pre_migration_book, monkeypatch, capsys):
+    """Partial state: comments already live in E, cli still missing --
+    move_comments must not run again. Critically, it must not disturb
+    column widths on a D/E pair it has nothing to move: move_comments'
+    trailing column-dimension block runs even when comment_rows(BEFORE) is
+    empty, so calling it unconditionally would silently overwrite E's width
+    with D's (or wipe a width the user set on D since the last migration)
+    on a run whose printed plan only ever mentioned the cli column."""
+    wb, ws = sheet.open_for_write(pre_migration_book, SHEET)
+    migrate.move_comments(ws)
+    sheet.save(wb, pre_migration_book)
+
+    # Simulate a user who has since set a width on the now-empty D.
+    wb, ws = sheet.open_for_write(pre_migration_book, SHEET)
+    ws.column_dimensions["D"].width = 12.0
+    sheet.save(wb, pre_migration_book)
+
+    before = openpyxl.load_workbook(pre_migration_book)[SHEET]
+    e_width_before = before.column_dimensions["E"].width
+    assert e_width_before is not None
+
+    monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
+    monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    assert migrate.main([]) == 0
+    out = capsys.readouterr().out
+    assert "flyttet" not in out  # nothing was moved this run
+    assert "cli" in out
+
+    ws2 = openpyxl.load_workbook(pre_migration_book)[SHEET]
+    assert ws2["C1"].value == "cli"
+    assert ws2.column_dimensions["D"].width == pytest.approx(12.0)
+    assert ws2.column_dimensions["E"].width == pytest.approx(e_width_before)
+
+
+def test_main_only_moves_comments_when_cli_already_present(
+        pre_migration_book, monkeypatch, capsys):
+    """Partial state: cli already added, comments still in D -- only the
+    move is outstanding, and the success message must say so."""
+    wb, ws = sheet.open_for_write(pre_migration_book, SHEET)
+    migrate.add_cli_column(ws)
+    sheet.save(wb, pre_migration_book)
+
+    monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
+    monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    assert migrate.main([]) == 0
+    out = capsys.readouterr().out
+    assert "flyttet" in out
+    assert "tilføjet" not in out  # the cli column was not touched this run
+
+    ws2 = openpyxl.load_workbook(pre_migration_book)[SHEET]
+    assert ws2["C1"].value == "cli"
+    assert ws2["E1"].value == "Dage siden sidste skift"
+    assert ws2["D1"].value is None
+
+
+def test_add_cli_column_derives_both_edges_from_the_ref(pre_migration_book):
+    """table.ref is the source of truth for both edges -- not a hardcoded
+    A1 origin, and not fragile against absolute ($) anchors, which Excel
+    itself writes on manual edits and which naive digit-stripping would
+    mangle if the origin were not A1."""
+    wb, ws = sheet.open_for_write(pre_migration_book, SHEET)
+    table = ws.tables["Table2"]
+    table.ref = f"$A$2:$B${TABLE_BOTTOM}"
+    table.autoFilter.ref = table.ref
+
+    migrate.add_cli_column(ws)
+    sheet.save(wb, pre_migration_book)
+
+    table2 = openpyxl.load_workbook(pre_migration_book)[SHEET].tables["Table2"]
+    assert table2.ref == f"A2:C{TABLE_BOTTOM}"
+    assert table2.autoFilter.ref == f"A2:C{TABLE_BOTTOM}"
+
+
+def test_e_guard_does_not_fire_on_a_style_only_cell(pre_migration_book):
+    """Mirrors the real workbook exactly: E2 exists in the sheet XML with a
+    style but no value. Both comment_rows (which move_comments and _blocked
+    both rely on) and _blocked itself must treat it as unoccupied -- this is
+    precisely the scenario that would silently block the live migration if
+    the guard were ever changed to test cell existence rather than value."""
+    wb, ws = sheet.open_for_write(pre_migration_book, SHEET)
+    assert (2, 5) in ws._cells  # the style-only cell really is there
+    assert migrate.comment_rows(ws, migrate.COMMENT_COL_AFTER) == []
+    assert migrate._blocked(ws) is None
+
+
+def test_blocked_does_not_create_c1_when_it_is_absent(pre_migration_book):
+    """_blocked must be able to ask "does C1 hold something unexpected"
+    without bringing C1 into existence as a side effect -- ws.cell() does
+    that, which is exactly the hazard comment_rows' docstring warns about.
+    On the real file C1 does not exist before migration."""
+    wb, ws = sheet.open_for_write(pre_migration_book, SHEET)
+    assert (1, sheet.CLI_COL) not in ws._cells
+
+    assert migrate._blocked(ws) is None
+    assert (1, sheet.CLI_COL) not in ws._cells

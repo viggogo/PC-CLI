@@ -21,6 +21,7 @@ from copy import copy
 from pathlib import Path
 
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import range_boundaries
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.worksheet.table import TableColumn
 
@@ -114,10 +115,12 @@ def add_cli_column(ws) -> None:
     ws.cell(1, sheet.CLI_COL, sheet.CLI_HEADER)
 
     table = ws.tables[TABLE_NAME]
-    last_col = get_column_letter(sheet.CLI_COL)
-    bottom = table.ref.split(":")[1]
-    bottom_row = "".join(ch for ch in bottom if ch.isdigit())
-    new_ref = f"A1:{last_col}{bottom_row}"
+    # range_boundaries handles both edges -- not a hardcoded "A1" origin,
+    # and not fragile against absolute ($) anchors the way stripping
+    # non-digit characters out of the ref string would be.
+    min_col, min_row, _, max_row = range_boundaries(table.ref)
+    origin = f"{get_column_letter(min_col)}{min_row}"
+    new_ref = f"{origin}:{get_column_letter(sheet.CLI_COL)}{max_row}"
 
     table.ref = new_ref
     if table.autoFilter is not None:
@@ -145,9 +148,21 @@ def plan(ws) -> list[str]:
     return steps
 
 
+def _peek(ws, row: int, col: int):
+    """Read a cell's value without creating it as a side effect.
+
+    ws.cell(row, col) CREATES the cell if it is absent -- the exact hazard
+    comment_rows' own docstring names. On the real file C1 does not exist
+    before migration, so asking "what does C1 hold" must not itself bring
+    C1 into existence.
+    """
+    cell = ws._cells.get((row, col))
+    return cell.value if cell is not None else None
+
+
 def _blocked(ws) -> str | None:
     """A reason to refuse, or None."""
-    header = ws.cell(1, sheet.CLI_COL).value
+    header = _peek(ws, 1, sheet.CLI_COL)
     if header is not None and not sheet.has_cli_column(ws):
         return (f"C1 indeholder allerede {header!r}, ikke "
                 f"{sheet.CLI_HEADER!r}. Migreringen er afbrudt.")
@@ -202,28 +217,44 @@ def main(argv=None) -> int:
     made = backup(path)
     print(f"Sikkerhedskopi: {made.name}")
 
-    try:
-        moved = move_comments(ws)
-    except RuntimeError as exc:
-        # Half-moved in memory only -- never save from here. The user has
-        # just been told about the backup; point them at it.
-        print(f"Fejl under flytning af kommentarer: {exc}", file=sys.stderr)
-        print(f"Arket er IKKE gemt. Sikkerhedskopien ligger her: {made}",
-              file=sys.stderr)
-        wb.close()
-        return 1
+    # Only run each job when it is actually outstanding -- move_comments'
+    # trailing column-dimension block runs even when there is nothing to
+    # move, and would otherwise silently overwrite E's width with D's (or
+    # delete a width the user set on D since the last migration) on a run
+    # whose printed plan never mentioned touching either column.
+    if comment_rows(ws, COMMENT_COL_BEFORE):
+        try:
+            moved = move_comments(ws)
+        except RuntimeError as exc:
+            # Half-moved in memory only -- never save from here. The user
+            # has just been told about the backup; point them at it.
+            print(f"Fejl under flytning af kommentarer: {exc}", file=sys.stderr)
+            print(f"Arket er IKKE gemt. Sikkerhedskopien ligger her: {made}",
+                  file=sys.stderr)
+            wb.close()
+            return 1
+    else:
+        moved = 0
 
-    if not sheet.has_cli_column(ws):
+    added_cli = not sheet.has_cli_column(ws)
+    if added_cli:
         add_cli_column(ws)
 
     try:
         sheet.save(wb, path)
     except sheet.WorkbookLocked:
         print("Fejl: Luk Excel og prøv igen.", file=sys.stderr)
+        wb.close()
         return 1
 
-    print(f"Færdig. {moved} kommentar(er) flyttet, kolonnen "
-          f'"{sheet.CLI_HEADER}" tilføjet.')
+    # Report only the work actually done -- on a one-shot migration this
+    # line is the user's only record of what changed.
+    done = []
+    if moved:
+        done.append(f"{moved} kommentar(er) flyttet")
+    if added_cli:
+        done.append(f'kolonnen "{sheet.CLI_HEADER}" tilføjet')
+    print("Færdig. " + ", ".join(done) + ".")
     return 0
 
 
