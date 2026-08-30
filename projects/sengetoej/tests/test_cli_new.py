@@ -66,7 +66,9 @@ def test_yes_flag_skips_the_prompt(book_env, monkeypatch):
 
 def test_a_malformed_date_is_a_usage_error(book_env, capsys):
     assert cli.main(["--new", "2026-02-09", "-y"]) == 2
-    assert "dd/mm/yyyy" in capsys.readouterr().err
+    out, err = capsys.readouterr()
+    assert "dd/mm/yyyy" in err
+    assert "Åbner regnearket" not in out
     assert rows(book_env)[3] == (None, None)
 
 
@@ -78,7 +80,9 @@ def test_leading_zeros_are_optional(book_env, monkeypatch):
 
 def test_a_future_date_is_rejected(book_env, capsys):
     assert cli.main(["--new", "01/03/2026", "-y"]) == 2
-    assert "fremtiden" in capsys.readouterr().err
+    out, err = capsys.readouterr()
+    assert "fremtiden" in err
+    assert "Åbner regnearket" not in out
     assert rows(book_env)[3] == (None, None)
 
 
@@ -86,6 +90,17 @@ def test_a_duplicate_date_is_rejected(book_env, capsys):
     assert cli.main(["--new", "03/02/2026", "-y"]) == 2
     err = capsys.readouterr().err
     assert "findes allerede" in err
+    assert rows(book_env)[3] == (None, None)
+
+
+def test_a_date_that_is_both_a_duplicate_and_earlier_reports_as_duplicate(
+        book_env, capsys):
+    # 15/01/2026 is DATES[1]: it duplicates an existing row AND is strictly
+    # earlier than the last row (03/02/2026). The duplicate check must win.
+    assert cli.main(["--new", "15/01/2026", "-y"]) == 2
+    err = capsys.readouterr().err
+    assert "findes allerede" in err
+    assert "ligger før sidste række" not in err
     assert rows(book_env)[3] == (None, None)
 
 
