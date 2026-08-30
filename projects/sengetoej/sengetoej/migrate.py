@@ -13,17 +13,24 @@ Two jobs, one save:
 Run once, deliberately, never from the CLI. It takes a backup first.
 """
 
+import argparse
 import datetime as dt
 import shutil
+import sys
 from copy import copy
 from pathlib import Path
 
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.formula import ArrayFormula
+from openpyxl.worksheet.table import TableColumn
 
 from . import sheet
+from .env import excel_path, load_env, sheet_name
 
 COMMENT_COL_BEFORE = 4  # D
 COMMENT_COL_AFTER = 5   # E
+
+TABLE_NAME = "Table2"
 
 
 def comment_rows(ws, col: int) -> list[int]:
@@ -100,3 +107,125 @@ def move_comments(ws) -> int:
         del ws.column_dimensions[before_letter]
 
     return len(rows)
+
+
+def add_cli_column(ws) -> None:
+    """Add `cli` to Table2. All four pieces must agree or Excel objects."""
+    ws.cell(1, sheet.CLI_COL, sheet.CLI_HEADER)
+
+    table = ws.tables[TABLE_NAME]
+    last_col = get_column_letter(sheet.CLI_COL)
+    bottom = table.ref.split(":")[1]
+    bottom_row = "".join(ch for ch in bottom if ch.isdigit())
+    new_ref = f"A1:{last_col}{bottom_row}"
+
+    table.ref = new_ref
+    if table.autoFilter is not None:
+        table.autoFilter.ref = new_ref
+
+    next_id = max((c.id for c in table.tableColumns), default=0) + 1
+    table.tableColumns.append(TableColumn(id=next_id, name=sheet.CLI_HEADER))
+
+
+def backup(path: Path) -> Path:
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = path.with_name(f"{path.stem}.{stamp}.bak{path.suffix}")
+    shutil.copy2(path, target)
+    return target
+
+
+def plan(ws) -> list[str]:
+    """What still needs doing. Empty means the sheet is already migrated."""
+    steps = []
+    if comment_rows(ws, COMMENT_COL_BEFORE):
+        steps.append(f"Flyt kommentarer D -> E "
+                     f"({len(comment_rows(ws, COMMENT_COL_BEFORE))} celler)")
+    if not sheet.has_cli_column(ws):
+        steps.append(f'Tilføj kolonnen "{sheet.CLI_HEADER}" til {TABLE_NAME} (C)')
+    return steps
+
+
+def _blocked(ws) -> str | None:
+    """A reason to refuse, or None."""
+    header = ws.cell(1, sheet.CLI_COL).value
+    if header is not None and not sheet.has_cli_column(ws):
+        return (f"C1 indeholder allerede {header!r}, ikke "
+                f"{sheet.CLI_HEADER!r}. Migreringen er afbrudt.")
+    if comment_rows(ws, COMMENT_COL_BEFORE) and comment_rows(ws, COMMENT_COL_AFTER):
+        return ("Kolonne E er ikke tom, og kommentarerne står stadig i D. "
+                "Migreringen er afbrudt.")
+    return None
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m sengetoej.migrate",
+        description="Engangsmigrering: flyt kommentarer D -> E og "
+                    'tilføj kolonnen "cli" til Table2.')
+    parser.add_argument("-y", "--yes", action="store_true",
+                        help="spring bekræftelsen over")
+    args = parser.parse_args(argv)
+
+    load_env()
+    path, tab = excel_path(), sheet_name()
+
+    try:
+        wb, ws = sheet.open_for_write(path, tab)
+    except FileNotFoundError:
+        print(f"Fejl: filen findes ikke: {path}", file=sys.stderr)
+        return 1
+    except sheet.SheetMissing:
+        print(f"Fejl: arket {tab!r} findes ikke i {path}", file=sys.stderr)
+        return 1
+
+    reason = _blocked(ws)
+    if reason:
+        print(f"Fejl: {reason}", file=sys.stderr)
+        wb.close()
+        return 1
+
+    steps = plan(ws)
+    if not steps:
+        print("Arket er allerede migreret. Intet at gøre.")
+        wb.close()
+        return 0
+
+    print(f"{path}  [{tab}]")
+    for step in steps:
+        print(f"  - {step}")
+
+    if not args.yes and input("Udfør migreringen? [y/N] ").strip().lower() not in ("y", "yes"):
+        print("Afbrudt.")
+        wb.close()
+        return 0
+
+    made = backup(path)
+    print(f"Sikkerhedskopi: {made.name}")
+
+    try:
+        moved = move_comments(ws)
+    except RuntimeError as exc:
+        # Half-moved in memory only -- never save from here. The user has
+        # just been told about the backup; point them at it.
+        print(f"Fejl under flytning af kommentarer: {exc}", file=sys.stderr)
+        print(f"Arket er IKKE gemt. Sikkerhedskopien ligger her: {made}",
+              file=sys.stderr)
+        wb.close()
+        return 1
+
+    if not sheet.has_cli_column(ws):
+        add_cli_column(ws)
+
+    try:
+        sheet.save(wb, path)
+    except sheet.WorkbookLocked:
+        print("Fejl: Luk Excel og prøv igen.", file=sys.stderr)
+        return 1
+
+    print(f"Færdig. {moved} kommentar(er) flyttet, kolonnen "
+          f'"{sheet.CLI_HEADER}" tilføjet.')
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
