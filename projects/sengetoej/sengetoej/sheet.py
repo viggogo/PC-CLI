@@ -85,3 +85,61 @@ def gaps(dates: list[dt.date]) -> list[int | None]:
     """Days since the previous entry, aligned to `dates`. None for the first."""
     return [None if i == 0 else (d - dates[i - 1]).days
             for i, d in enumerate(dates)]
+
+
+class WorkbookLocked(Exception):
+    """Excel is holding the file open, so it cannot be saved."""
+
+
+def open_for_write(path: Path, sheet_name: str):
+    """Load the workbook for editing. Costs ~6.5s on the real file.
+
+    read_only mode cannot be used here: it forbids ws.cell() and cannot save.
+    """
+    wb = openpyxl.load_workbook(path)
+    if sheet_name not in wb.sheetnames:
+        wb.close()
+        raise SheetMissing(sheet_name)
+    return wb, wb[sheet_name]
+
+
+def dates_and_next_row(ws) -> tuple[list[dt.date], int]:
+    """The same scan as read_dates, over an already-open worksheet.
+
+    iter_rows rather than ws.cell(): ws.cell() on an empty cell CREATES it,
+    so scanning a run of blanks would add phantom cells to the sheet on
+    every --new. iter_rows creates none, and in normal mode it is bounded
+    by ws.max_row, which correctly yields nothing at all on an empty sheet.
+    """
+    values = (row[0] for row in
+              ws.iter_rows(min_row=FIRST_DATA_ROW, max_col=DATE_COL,
+                           values_only=True))
+    return scan(values)
+
+
+def has_cli_column(ws) -> bool:
+    header = ws.cell(1, CLI_COL).value
+    return isinstance(header, str) and header.strip().lower() == CLI_HEADER
+
+
+def append_entry(ws, when: dt.date, row: int) -> None:
+    """Write the date and the cli flag. Two cells, nothing else.
+
+    Column B already holds the Diff formula in this row and every row below,
+    and Table2's ref already spans the full column, so neither needs touching.
+    """
+    target = ws.cell(row, DATE_COL)
+    target.value = dt.datetime(when.year, when.month, when.day)
+    above = ws.cell(row - 1, DATE_COL)
+    if above.value is not None:
+        target.number_format = above.number_format
+    ws.cell(row, CLI_COL, 1)
+
+
+def save(wb, path: Path) -> None:
+    try:
+        wb.save(path)
+    except PermissionError as exc:
+        raise WorkbookLocked(path) from exc
+    finally:
+        wb.close()
