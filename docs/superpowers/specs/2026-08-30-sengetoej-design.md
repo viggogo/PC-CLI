@@ -24,11 +24,13 @@ In scope:
 Explicitly out of scope (decided, not deferred):
 
 - **No back-dating.** Appending only. Inserting a row in date order would shift
-  the free-text notes in column D — which sit *outside* `Table2` — out of
-  alignment with their dates, silently corrupting them. The user was asked and
-  chose append-only.
-- **No note column.** Column D is neither read nor written. The user was asked
-  and chose the plain date + interval list.
+  the free-text comments — which sit *outside* `Table2` — out of alignment with
+  their dates, silently corrupting them. The user was asked and chose
+  append-only.
+- **No comment column in the CLI.** The comments are never read or written by
+  `--last` or `--new`. The migration relocates them once, and after that the
+  tool ignores them entirely. The user was asked and chose the plain date +
+  interval list.
 - **No summary statistics.** No average interval, no streaks. Same decision.
 - **No calendar view.** Changes are ~20 days apart, so a `hevy --weeks`-style
   grid would be nearly all empty cells.
@@ -50,7 +52,11 @@ Verified against the live workbook during design
 | Column A | `Date`, a real `datetime`, number format `mm-dd-yy` |
 | Column B | `Diff`, a formula (see below) |
 | Column C | **Entirely empty**, rows 1–80 verified. Width 10.7, not hidden |
-| Column D | Free text, **outside** `Table2` |
+| Column D | Free-text comments, **outside** `Table2`. Width 20.6 |
+| Column E | **Entirely empty**. Width 10.7 |
+| References to column D | **None**, anywhere in the workbook (see below) |
+| Conditional formatting, merged cells, data validation, freeze panes | None on this sheet |
+| Defined names | None in the workbook |
 | Data rows | 2 through 73 as of this design (72 entries) |
 | First entry | 2023-10-09 |
 | Last entry | 2026-08-30 |
@@ -72,11 +78,17 @@ the whole design:
    data. So is `Table2`'s ref. The end of the data can only be found by
    scanning column A.
 
-Column D holds a label in D1, an array formula in D2
-(`=DAY(ABS(TODAY()-INDEX(A:A,COUNTA(A:A))))`), a legend in D4, and scattered
-per-row remarks further down (`NZ og CA`, `Juleferie`, `Obs: Ferie`, `Amst`…).
-Because D is outside the table, its rows are aligned to the dates by position
+The comment column holds a label in D1, an array formula in D2
+(`=DAY(ABS(TODAY()-INDEX(A:A,COUNTA(A:A))))`, bold, yellow fill `FFFFFF00`), a
+legend in D4, and scattered per-row remarks further down at rows 29, 36, 48, 50,
+59, 70, 71 and 72 (`NZ og CA`, `Juleferie`, `Obs: Ferie`, `Amst`…). Because the
+column sits outside the table, its rows are aligned to the dates by position
 alone — nothing but append-only writing keeps that alignment true.
+
+Searching every formula on every sheet, plus the defined names, turns up **no
+reference to this sheet's column D at all**. The D2 array formula refers only to
+`A:A`. The column can therefore be relocated without breaking anything — which
+the migration does, for the reason under **Layout of the columns** below.
 
 ## Stack
 
@@ -158,10 +170,48 @@ The header is lowercase `cli`, as the user wrote it, though its siblings are
 `Date` and `Diff`. Header text is not load-bearing anywhere except the guard
 below, which compares case-insensitively.
 
+### Layout of the columns
+
+Today the sheet reads: table in `A:B`, an empty column `C`, comments in `D`. The
+blank column is what separates the table from the comments visually.
+
+Dropping `cli` into `C` would consume that gap and leave the table butting
+directly against the comments. So the migration also **moves the comments one
+column right, D → E**, restoring the spacer:
+
+| | Before | After |
+|---|---|---|
+| A | `Date` | `Date` |
+| B | `Diff` | `Diff` |
+| C | *(empty)* | `cli` |
+| D | comments | *(empty — the spacer)* |
+| E | *(empty)* | comments |
+
+The comments stay outside `Table2`, keep their row alignment, and keep their
+content. Only their column changes.
+
 ### Migration
 
-Adding the column is **not** just writing `C1`. Excel will report the workbook as
-corrupt if the pieces disagree, so all four must change together:
+Two jobs, one script, one save.
+
+**Job 1 — move the comments D → E.** For every populated row: value, style,
+number format. Then clear D, move the 20.6 width from D to E, and let D fall back
+to the default width.
+
+Three hazards, all of which the implementation must handle explicitly:
+
+- **Formula translation must be off.** openpyxl's `move_range(..., translate=True)`
+  rewrites relative references by the offset moved — which would turn D2's
+  `INDEX(A:A,COUNTA(A:A))` into `INDEX(B:B,COUNTA(B:B))`, silently repointing the
+  "days since" counter at the `Diff` column. It must move with `translate=False`.
+- **The array formula's own ref must be rewritten.** D2 is an `ArrayFormula`
+  object carrying `ref="D2"`, not a plain string. It has to be reconstructed as
+  `ref="E2"` or Excel will disagree with itself about where the formula lives.
+- **Styling must travel.** D2 is bold on a yellow fill; a value-only move would
+  land the counter as unstyled text.
+
+**Job 2 — add the `cli` column.** Not just writing `C1`. Excel reports the
+workbook as corrupt if the pieces disagree, so all four change together:
 
 1. `C1` ← `cli`
 2. `Table2.ref` → `A1:C1048576`
@@ -172,9 +222,10 @@ This happens once, in `migrate.py`, run deliberately — never from `--new`. The
 script:
 
 - **Refuses to run twice.** If `C1` already reads `cli`, it reports that and
-  exits 0, changing nothing.
+  exits 0, changing nothing. Both jobs are checked, so a half-applied migration
+  cannot be papered over.
 - **Refuses to run on unexpected data.** If `C1` is non-empty and is not `cli`,
-  it stops rather than overwrite whatever is there.
+  or if column E is not empty, it stops rather than overwrite whatever is there.
 - **Writes a timestamped backup** beside the workbook before saving, since this
   is the one operation in the tool that rewrites table structure rather than
   cell values.
@@ -185,8 +236,10 @@ That is expected, not a defect.
 
 Because openpyxl's table-schema handling is the least-exercised part of this
 design, the migration is **verified by opening the workbook in Excel afterwards**
-and confirming the table reads as three columns with no repair prompt. That check
-is a step in the implementation plan, not something the tests can cover.
+and confirming: no repair prompt, the table reads as three columns, the comments
+sit in E against the right dates, and the yellow "Dage siden sidste skift"
+counter still shows the correct number. That check is a step in the
+implementation plan, not something the tests can cover.
 
 ### Guard
 
@@ -334,8 +387,8 @@ It writes nothing else:
   below it. Writing it would be redundant, and writing it *wrong* would be worse.
 - After the migration, `Table2`'s ref spans `A1:C1048576`, so the table range
   still needs no extension per row.
-- Column D is never touched, and append-only writing keeps its rows aligned to
-  their dates.
+- The comment column is never touched, and append-only writing keeps its rows
+  aligned to their dates.
 - The table schema is never altered here. That is `migrate.py`'s job alone.
 
 If Excel holds the file, `wb.save()` raises `PermissionError`. That is caught and
@@ -348,21 +401,27 @@ pytest, entirely offline. **No test opens the real spreadsheet.**
 
 `conftest.py` builds a miniature workbook in `tmp_path` shaped like the real one:
 a `Table2` with an over-wide ref, `Diff` formulas pre-filled past the end of the
-data, trailing blank rows, an empty column C, and a column D outside the table.
-The traps the design exists to handle are therefore present in the fixture. Two
-variants are needed — pre-migration (two columns) and post-migration (three) —
-so the migration and the guard can both be tested.
+data, trailing blank rows, an empty column C, and a comment column outside the
+table carrying a styled array formula alongside plain text. The traps the design
+exists to handle are therefore present in the fixture. Two variants are needed —
+pre-migration (comments in D, no `cli`) and post-migration (comments in E, `cli`
+in C) — so the migration and the guard can both be tested.
 
 Cases to cover:
 
 - **sheet:** end-of-data scan past pre-filled formulas and trailing blanks; scan
   on an empty sheet; entries read in order; append lands in the first empty row;
   append writes `1` to column C; append leaves column B's formula intact; append
-  leaves column D untouched; append copies the number format; duplicate
-  detected; out-of-order detected.
-- **migrate:** header, table ref, autofilter ref and `tableColumns` all updated
-  together; existing rows left blank in column C, not backfilled; re-running is
-  a no-op that exits 0; a non-empty, non-`cli` `C1` aborts; the backup file is
+  leaves the comment column untouched; append copies the number format;
+  duplicate detected; out-of-order detected.
+- **migrate, job 1:** every populated comment moves D → E against the same row;
+  D ends up empty; the array formula's text is **unchanged** (proving
+  `translate=False`) and its `ref` is now `E2`; bold and yellow fill survive;
+  the 20.6 width moves to E.
+- **migrate, job 2:** header, table ref, autofilter ref and `tableColumns` all
+  updated together; existing rows left blank in column C, not backfilled.
+- **migrate, safety:** re-running is a no-op that exits 0; a non-empty,
+  non-`cli` `C1` aborts; a non-empty column E aborts; the backup file is
   written; declining the prompt changes nothing. The saved workbook is reopened
   and re-parsed within the test to prove openpyxl can still read the table it
   just wrote — the nearest a test can get to Excel's own validation.
