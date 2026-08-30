@@ -323,6 +323,66 @@ def test_e_guard_does_not_fire_on_a_style_only_cell(pre_migration_book):
     assert migrate._blocked(ws) is None
 
 
+def test_main_reports_a_missing_file(tmp_path, monkeypatch, capsys):
+    missing = tmp_path / "nope.xlsx"
+    monkeypatch.setenv("EXCEL_PATH", str(missing))
+    monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
+
+    assert migrate.main([]) == 1
+    assert "findes ikke" in capsys.readouterr().err
+
+
+def test_main_reports_a_missing_sheet(pre_migration_book, monkeypatch, capsys):
+    monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
+    monkeypatch.setenv("SENGETOEJ_SHEET", "Findes Ikke")
+
+    assert migrate.main([]) == 1
+    err = capsys.readouterr().err
+    assert "Findes Ikke" in err
+    assert str(pre_migration_book) in err
+
+
+def test_main_reports_a_locked_workbook(pre_migration_book, monkeypatch, capsys):
+    def locked(wb, path):
+        raise sheet.WorkbookLocked(path)
+
+    monkeypatch.setattr(sheet, "save", locked)
+    monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
+    monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    assert migrate.main([]) == 1
+    assert "Luk Excel" in capsys.readouterr().err
+
+
+def test_main_reports_a_corrupt_workbook_and_points_at_the_backup_convention(
+        tmp_path, monkeypatch, capsys):
+    """The only way this tool can leave a corrupt workbook is an interrupted
+    wb.save() -- and the user's natural next move is to re-run migrate. A
+    truncated/garbage .xlsx is enough to trigger zipfile.BadZipFile, which
+    must be reported in Danish rather than escape as a traceback."""
+    corrupt = tmp_path / "corrupt.xlsx"
+    corrupt.write_bytes(b"not a zip file at all, just garbage bytes")
+    monkeypatch.setenv("EXCEL_PATH", str(corrupt))
+    monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
+
+    assert migrate.main([]) == 1
+    err = capsys.readouterr().err
+    assert "kan ikke læses" in err
+    assert ".bak" in err
+
+
+def test_main_reports_a_directory_path_as_an_unreadable_workbook(
+        tmp_path, monkeypatch, capsys):
+    """A directory raises openpyxl.utils.exceptions.InvalidFileException,
+    not BadZipFile -- both must be handled."""
+    monkeypatch.setenv("EXCEL_PATH", str(tmp_path))
+    monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
+
+    assert migrate.main([]) == 1
+    assert "kan ikke læses" in capsys.readouterr().err
+
+
 def test_blocked_does_not_create_c1_when_it_is_absent(pre_migration_book):
     """_blocked must be able to ask "does C1 hold something unexpected"
     without bringing C1 into existence as a side effect -- ws.cell() does

@@ -15,9 +15,19 @@ Both have working defaults, so no configuration is required.
 import argparse
 import datetime as dt
 import sys
+import zipfile
+
+from openpyxl.utils.exceptions import InvalidFileException
 
 from . import sheet
 from .env import excel_path, load_env, sheet_name
+
+# A workbook openpyxl cannot even parse: a truncated/corrupt .xlsx raises
+# BadZipFile, a path that is not an .xlsx at all (e.g. a directory) raises
+# InvalidFileException. Widened here so both read the same as a runtime
+# failure instead of escaping as a traceback -- see sheet.open_for_write
+# and sheet.read_dates, neither of which narrows these itself.
+UNREADABLE_WORKBOOK = (zipfile.BadZipFile, InvalidFileException)
 
 DATE_FORMAT = "%d/%m/%Y"
 
@@ -94,6 +104,10 @@ def _load_dates():
     except sheet.SheetMissing:
         print(f"Fejl: arket {tab!r} findes ikke i {path}", file=sys.stderr)
         return None, 1
+    except UNREADABLE_WORKBOOK:
+        print(f"Fejl: filen kan ikke læses (ugyldigt eller beskadiget "
+              f"Excel-format): {path}", file=sys.stderr)
+        return None, 1
 
 
 def cmd_last(count: int) -> int:
@@ -134,7 +148,7 @@ def cmd_new(value: str, assume_yes: bool) -> int:
     load_env()
     path, tab = excel_path(), sheet_name()
 
-    # ~6.5s on the real workbook, and ~8.5s more to save. Say so, or it
+    # ~6.6s on the real workbook, and ~8.5s more to save. Say so, or it
     # looks hung.
     print("Åbner regnearket ...")
     try:
@@ -144,6 +158,10 @@ def cmd_new(value: str, assume_yes: bool) -> int:
         return 1
     except sheet.SheetMissing:
         print(f"Fejl: arket {tab!r} findes ikke i {path}", file=sys.stderr)
+        return 1
+    except UNREADABLE_WORKBOOK:
+        print(f"Fejl: filen kan ikke læses (ugyldigt eller beskadiget "
+              f"Excel-format): {path}", file=sys.stderr)
         return 1
 
     if not sheet.has_cli_column(ws):

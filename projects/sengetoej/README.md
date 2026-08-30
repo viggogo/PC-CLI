@@ -56,14 +56,14 @@ Worked examples:
 Sidste skift: 22/08/2026 (8 dage siden)
 
 > sengetoej --last 3
-  15/08/2026       —
+  15/08/2026          —
   20/08/2026       5 dage
   22/08/2026       2 dage
 
 > sengetoej --new
 Åbner regnearket ...
 Tilføj 30/08/2026? (8 dage siden sidste skift) [y/N] y
-Tilføjet i række 214.
+Tilføjet i række 75.
 
 > sengetoej --new 15/08/2026
 Åbner regnearket ...
@@ -71,14 +71,14 @@ Fejl: 15/08/2026 findes allerede i arket.
 ```
 
 `--last` is effectively instant (~0.01 s). `--new` takes roughly 15 seconds
-— about 6.5 s to load the workbook and 8.5 s to save it — because the sheet
+— about 6.6 s to load the workbook and 8.5 s to save it — because the sheet
 stores over a million cells (the `Diff` formula is materialised in every
 row, all the way to the sheet's last row). `--new` prints
 `Åbner regnearket ...` before it starts, so that wait doesn't read as a
 hang.
 
 Exit codes: `0` success, `1` runtime failure (missing file, missing sheet,
-missing `cli` column, workbook locked), `2` usage error (bad date, future
+unreadable/corrupt file, missing `cli` column, workbook locked), `2` usage error (bad date, future
 date, duplicate date, out-of-order date, `-y` without `--new`).
 
 ## Configuration
@@ -120,7 +120,7 @@ and `1` into column C. Column B's `Diff` formula is already present in every
 row below the last real one — it's a formula, not a value, so it doesn't
 need writing — and `Table2`'s ref already spans the full column, so it's
 never extended either. `open_for_write` cannot use `read_only` mode, since
-that mode forbids `ws.cell()` and can't save; this is also the ~6.5 s /
+that mode forbids `ws.cell()` and can't save; this is also the ~6.6 s /
 ~8.5 s cost `--new` pays that `--last` doesn't.
 
 ## Migration

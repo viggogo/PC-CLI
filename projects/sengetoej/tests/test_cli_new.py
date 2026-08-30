@@ -124,6 +124,42 @@ def test_a_missing_cli_column_refuses_and_points_at_the_migration(
     assert "migrate" in err
 
 
+def test_new_reports_a_missing_file(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EXCEL_PATH", str(tmp_path / "nope.xlsx"))
+    monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
+    monkeypatch.setattr(cli, "today", lambda: dt.date(2026, 2, 10))
+
+    assert cli.main(["--new", "-y"]) == 1
+    assert "findes ikke" in capsys.readouterr().err
+
+
+def test_new_reports_a_missing_sheet(pre_migration_book, monkeypatch, capsys):
+    monkeypatch.setenv("EXCEL_PATH", str(pre_migration_book))
+    monkeypatch.setenv("SENGETOEJ_SHEET", "Findes Ikke")
+    monkeypatch.setattr(cli, "today", lambda: dt.date(2026, 2, 10))
+
+    assert cli.main(["--new", "-y"]) == 1
+    err = capsys.readouterr().err
+    assert "Findes Ikke" in err
+    assert str(pre_migration_book) in err
+
+
+def test_new_reports_a_corrupt_workbook(tmp_path, monkeypatch, capsys):
+    """The only way this tool can leave a corrupt workbook is an interrupted
+    wb.save(), and the user's natural next move after --new fails mid-save
+    is to just run --new again. A truncated/garbage .xlsx triggers
+    zipfile.BadZipFile, which must be reported in Danish, not as a
+    traceback."""
+    corrupt = tmp_path / "corrupt.xlsx"
+    corrupt.write_bytes(b"not a zip file at all, just garbage bytes")
+    monkeypatch.setenv("EXCEL_PATH", str(corrupt))
+    monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
+    monkeypatch.setattr(cli, "today", lambda: dt.date(2026, 2, 10))
+
+    assert cli.main(["--new", "-y"]) == 1
+    assert "kan ikke læses" in capsys.readouterr().err
+
+
 def test_a_locked_workbook_is_reported(book_env, monkeypatch, capsys):
     def locked(wb, path):
         raise cli.sheet.WorkbookLocked(path)

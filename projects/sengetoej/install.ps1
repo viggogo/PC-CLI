@@ -76,6 +76,6 @@ if ($normalized -contains $binKey) {
 Write-Host ''
 Write-Host 'ONE THING LEFT: run the one-time migration, which adds the "cli"'
 Write-Host 'column and moves the comments one column right. Close Excel first.'
-Write-Host "  $venvPy -m sengetoej.migrate"
+Write-Host "  & `"$venvPy`" -m sengetoej.migrate"
 Write-Host ''
 Write-Host 'Then open a NEW terminal and run:  sengetoej --last'

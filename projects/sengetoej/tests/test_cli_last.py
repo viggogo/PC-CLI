@@ -99,3 +99,15 @@ def test_missing_file_is_a_runtime_error(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
     assert cli.main(["--last"]) == 1
     assert "findes ikke" in capsys.readouterr().err
+
+
+def test_a_corrupt_workbook_is_a_runtime_error(tmp_path, monkeypatch, capsys):
+    """A truncated/garbage .xlsx raises zipfile.BadZipFile from
+    openpyxl.load_workbook, which must be reported in Danish rather than
+    escape _load_dates as a traceback."""
+    corrupt = tmp_path / "corrupt.xlsx"
+    corrupt.write_bytes(b"not a zip file at all, just garbage bytes")
+    monkeypatch.setenv("EXCEL_PATH", str(corrupt))
+    monkeypatch.setenv("SENGETOEJ_SHEET", SHEET)
+    assert cli.main(["--last"]) == 1
+    assert "kan ikke læses" in capsys.readouterr().err

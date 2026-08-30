@@ -17,16 +17,25 @@ import argparse
 import datetime as dt
 import shutil
 import sys
+import zipfile
 from copy import copy
 from pathlib import Path
 
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
+from openpyxl.utils.exceptions import InvalidFileException
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.worksheet.table import TableColumn
 
 from . import sheet
 from .env import excel_path, load_env, sheet_name
+
+# A workbook openpyxl cannot even parse: a truncated/corrupt .xlsx raises
+# BadZipFile, a path that is not an .xlsx at all (e.g. a directory) raises
+# InvalidFileException. The only way this tool itself can leave a workbook
+# in this state is an interrupted wb.save(), so the message below points at
+# the timestamped backup -- see backup().
+UNREADABLE_WORKBOOK = (zipfile.BadZipFile, InvalidFileException)
 
 COMMENT_COL_BEFORE = 4  # D
 COMMENT_COL_AFTER = 5   # E
@@ -191,6 +200,13 @@ def main(argv=None) -> int:
         return 1
     except sheet.SheetMissing:
         print(f"Fejl: arket {tab!r} findes ikke i {path}", file=sys.stderr)
+        return 1
+    except UNREADABLE_WORKBOOK:
+        print(f"Fejl: filen kan ikke læses (ugyldigt eller beskadiget "
+              f"Excel-format): {path}", file=sys.stderr)
+        print(f"Hvis en tidligere kørsel blev afbrudt under en gemning, "
+              f"ligger der formentlig en sikkerhedskopi ved siden af filen: "
+              f"{path.stem}.<tidsstempel>.bak{path.suffix}", file=sys.stderr)
         return 1
 
     reason = _blocked(ws)

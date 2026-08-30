@@ -92,7 +92,7 @@ class WorkbookLocked(Exception):
 
 
 def open_for_write(path: Path, sheet_name: str):
-    """Load the workbook for editing. Costs ~6.5s on the real file.
+    """Load the workbook for editing. Costs ~6.6s on the real file.
 
     read_only mode cannot be used here: it forbids ws.cell() and cannot save.
     """
@@ -111,10 +111,16 @@ def open_for_write(path: Path, sheet_name: str):
 def dates_and_next_row(ws) -> tuple[list[dt.date], int]:
     """The same scan as read_dates, over an already-open worksheet.
 
-    iter_rows rather than ws.cell(): ws.cell() on an empty cell CREATES it,
-    so scanning a run of blanks would add phantom cells to the sheet on
-    every --new. iter_rows creates none, and in normal mode it is bounded
-    by ws.max_row, which correctly yields nothing at all on an empty sheet.
+    iter_rows rather than ws.cell(): it reads the column cleanly and, via
+    scan()'s blank-run break, stops early instead of walking to ws.max_row.
+    In normal mode it does NOT avoid creating cells -- openpyxl 3.1.5's
+    Worksheet._cells_by_row is a generator over ws.cell(row=..., column=...),
+    so every cell iter_rows visits (including blanks) is instantiated, same
+    as calling ws.cell() directly would. That is harmless here: openpyxl's
+    writer skips any cell with no value and no style, so those phantom
+    blanks are never persisted and the saved file does not grow. iter_rows
+    is also bounded by ws.max_row, which correctly yields nothing at all on
+    an empty sheet.
     """
     values = (row[0] for row in
               ws.iter_rows(min_row=FIRST_DATA_ROW, max_col=DATE_COL,
@@ -123,7 +129,11 @@ def dates_and_next_row(ws) -> tuple[list[dt.date], int]:
 
 
 def has_cli_column(ws) -> bool:
-    header = ws.cell(1, CLI_COL).value
+    # ws._cells.get(...) rather than ws.cell(1, CLI_COL): the latter CREATES
+    # the cell if it is absent, which on the real, pre-migration file is a
+    # phantom C1 -- exactly the hazard migrate._peek exists to avoid.
+    cell = ws._cells.get((1, CLI_COL))
+    header = cell.value if cell is not None else None
     return isinstance(header, str) and header.strip().lower() == CLI_HEADER
 
 
