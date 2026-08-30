@@ -94,6 +94,7 @@ def test_an_earlier_date_is_rejected(book_env, capsys):
     err = capsys.readouterr().err
     assert "ligger før sidste række" in err
     assert "03/02/2026" in err
+    assert rows(book_env)[3] == (None, None)
 
 
 def test_a_missing_cli_column_refuses_and_points_at_the_migration(
