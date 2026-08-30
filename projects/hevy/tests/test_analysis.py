@@ -160,7 +160,7 @@ def test_cells_carry_consecutive_dates_starting_on_monday():
 
 
 def test_a_workout_lands_on_its_own_day_with_its_details(make_workout):
-    w = make_workout(title="ben", description="4/5 AC",
+    w = make_workout(title="ben", description="4, AC",
                      exercises=[strength_ex(reps=5, weight_kg=100)],
                      start=_at("2026-08-19"), end=_at("2026-08-19", 12))
 

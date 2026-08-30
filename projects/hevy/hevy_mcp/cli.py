@@ -4,7 +4,6 @@ Usage:
     hevy preview            show new workouts, write nothing
     hevy sync               show new workouts, then ask before adding
     hevy sync -y            add without asking
-    hevy fix                show corrections for recent tool rows, then ask
     hevy --weeks 2          show the last 2 weeks of training as a calendar
     hevy --weeks 5 -1       the same, without the current unfinished week
 
@@ -69,23 +68,6 @@ def cmd_sync(args) -> None:
     print(f"Added {n} row(s).")
 
 
-def cmd_fix(args) -> None:
-    changes = asyncio.run(sync_core.collect_fix_changes(dry_run=True))
-    if not changes:
-        print("No rows to fix.")
-        return
-    print(f"{len(changes)} row(s) would change:")
-    for rn, d, before, after in changes:
-        print(f"  row {rn} {d}: {before.get('Type')!r}->{after['Type']!r}  "
-              f"R {before.get('Rating')!r}->{after['Rating']!r}  "
-              f"AC {before.get('AddCardio')!r}->{after['AddCardio']!r}")
-    if not args.yes and not _confirm("\nApply these corrections? [y/N] "):
-        print("Aborted — nothing written.")
-        return
-    asyncio.run(sync_core.collect_fix_changes(dry_run=False))
-    print("Applied.")
-
-
 MAX_WEEKS = 52
 
 
@@ -120,10 +102,6 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("-y", "--yes", action="store_true", help="skip confirmation")
     sy.set_defaults(func=cmd_sync)
 
-    fx = sub.add_parser("fix", help="correct the recent tool-written rows")
-    fx.add_argument("-y", "--yes", action="store_true", help="skip confirmation")
-    fx.set_defaults(func=cmd_fix)
-
     return p
 
 
@@ -141,7 +119,7 @@ def main(argv=None) -> None:
     elif args.skip_current:
         parser.error("-1 only means anything alongside --weeks N")
     elif args.command is None:
-        parser.error("give a command (preview, sync, fix) or --weeks N")
+        parser.error("give a command (preview, sync) or --weeks N")
 
     try:
         if args.weeks is not None:

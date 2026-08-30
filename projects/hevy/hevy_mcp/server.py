@@ -56,34 +56,6 @@ async def add_single_workout(workout_id: str) -> str:
     return f"Added '{workout.get('title')}' ({row['Date']}, {row['Time']} min) to Excel."
 
 
-@mcp.tool()
-async def fix_synced_rows(confirm: bool = False) -> str:
-    """Re-map and correct the rows the old buggy tool wrote (2026-06-14 onward).
-
-    Shows a before/after preview when confirm is False; writes the corrections
-    (including restoring the Total formula and setting Claude=1) when confirm is True.
-    Requires the Claude column to already exist (run migrate_add_claude_column first).
-
-    Args:
-        confirm: Set True to apply the corrections. Default False = preview only.
-    """
-    changes = await sync_core.collect_fix_changes(dry_run=not confirm)
-    if not changes:
-        return "No matching rows found to correct."
-
-    lines = []
-    for rownum, d, before, after in changes:
-        lines.append(
-            f"row {rownum} {d}: "
-            f"Type {before.get('Type')!r}->{after['Type']!r}  "
-            f"Rating {before.get('Rating')!r}->{after['Rating']!r}  "
-            f"AddCardio {before.get('AddCardio')!r}->{after['AddCardio']!r}  "
-            f"Claude {before.get('Claude')!r}->{after['Claude']!r}"
-        )
-    header = ("APPLIED" if confirm else "PREVIEW (pass confirm=true to write)")
-    return f"{header} — {len(changes)} row(s):\n" + "\n".join(lines)
-
-
 def main() -> None:
     mcp.run()
 

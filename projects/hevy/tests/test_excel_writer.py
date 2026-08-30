@@ -65,35 +65,3 @@ def test_append_blank_rating_is_empty(tmp_book):
     assert ws.cell(row=r, column=ew.COLUMN_INDEX["Place"]).value is None
 
 
-def test_overwrite_rows_by_date_preview_then_write(tmp_book):
-    # Seed a "buggy" row: static Total, string Rating, Danish Type.
-    wb = openpyxl.load_workbook(tmp_book)
-    ws = wb["Træning"]
-    ws.append([date(2026, 6, 28), None, "Skub", 67, "x", None, None,
-               67, None, "4", None, "4 m Silas"])
-    wb.save(tmp_book)
-
-    after = {
-        "Date": date(2026, 6, 28), "Place": "", "Type": "push", "Time": 67,
-        "Mave": 0, "AddCardio": 0, "AddCardio2": 0, "Ensamble": 1,
-        "Rating": 4, "Claude": 1, "Comments": "4 m Silas",
-    }
-
-    preview = ew.overwrite_rows_by_date({date(2026, 6, 28): after}, dry_run=True)
-    assert len(preview) == 1
-    rownum, d, before, aft = preview[0]
-    assert d == date(2026, 6, 28)
-    assert before["Type"] == "Skub"          # unchanged on dry run
-    assert aft["Type"] == "push"
-
-    # Nothing written yet.
-    wb = openpyxl.load_workbook(tmp_book)
-    assert wb["Træning"].cell(row=rownum, column=ew.COLUMN_INDEX["Type"]).value == "Skub"
-
-    ew.overwrite_rows_by_date({date(2026, 6, 28): after}, dry_run=False)
-    wb = openpyxl.load_workbook(tmp_book)
-    ws = wb["Træning"]
-    assert ws.cell(row=rownum, column=ew.COLUMN_INDEX["Type"]).value == "push"
-    assert ws.cell(row=rownum, column=ew.COLUMN_INDEX["Rating"]).value == 4
-    assert ws.cell(row=rownum, column=ew.COLUMN_INDEX["Claude"]).value == 1
-    assert ws.cell(row=rownum, column=ew.COLUMN_INDEX["Total"]).value == ew.total_formula(rownum)

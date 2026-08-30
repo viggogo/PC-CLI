@@ -9,9 +9,6 @@ from typing import Optional
 
 from . import analysis, column_mapper, excel_writer, hevy_client
 
-# Rows from this date onward were written by the tool; fix operates on them.
-FIX_CUTOFF = datetime(2026, 6, 14)
-
 
 def resolve_since(since_date: str = "") -> Optional[datetime]:
     """Cutoff for fetching. Explicit YYYY-MM-DD wins; otherwise the day of the
@@ -55,17 +52,3 @@ async def collect_calendar(n_weeks: int, skip_current: bool = False,
     since = datetime.combine(mondays[0], datetime.min.time()) - timedelta(days=1)
     workouts = await hevy_client.fetch_workouts_since(since)
     return analysis.build_calendar(workouts, n_weeks, today)
-
-
-async def collect_fix_changes(dry_run: bool) -> list:
-    """Preview or apply corrections to the tool-written rows (FIX_CUTOFF onward).
-
-    Returns a list of (rownum, date, before, after). Writes only when
-    dry_run is False.
-    """
-    workouts = await hevy_client.fetch_workouts_since(FIX_CUTOFF - timedelta(days=1))
-    rows_by_date = {}
-    for w in workouts:
-        row = column_mapper.workout_to_row(w)
-        rows_by_date[row["Date"]] = row
-    return excel_writer.overwrite_rows_by_date(rows_by_date, dry_run=dry_run)

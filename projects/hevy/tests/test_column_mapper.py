@@ -17,22 +17,46 @@ def test_map_type_unknown_is_verbatim():
     assert cm._map_type("Crossfit WOD") == "Crossfit WOD"
 
 
-def test_parse_rating_returns_int():
-    assert cm._parse_rating("3") == 3
-    assert cm._parse_rating("4 tryg") == 4
-    assert cm._parse_rating("2, travlt") == 2
-    assert cm._parse_rating("god træning 5") == 5
-    assert cm._parse_rating("") is None
-    assert cm._parse_rating("lynild") is None
-    assert isinstance(cm._parse_rating("4"), int)
+def test_parse_note_splits_rating_place_comment():
+    assert cm._parse_note("4, AC, godt tempo") == (4, "AC", "godt tempo")
+    # An unknown gym is kept exactly as typed, not blanked.
+    assert cm._parse_note("4, sats, tungt i dag") == (4, "sats", "tungt i dag")
+    assert isinstance(cm._parse_note("4, AC, godt tempo")[0], int)
 
 
-def test_detect_place():
-    assert cm._detect_place("4, AC") == "AC"
-    assert cm._detect_place("Tryg m Peter") == "Tryg"
-    assert cm._detect_place("god center dag") == "Center"
-    assert cm._detect_place("travlt") == ""
-    assert cm._detect_place("") == ""
+def test_parse_note_canonicalises_known_places():
+    assert cm._parse_note("3, ac, fint")[1] == "AC"
+    assert cm._parse_note("3, center, fint")[1] == "Center"
+    assert cm._parse_note("3, TRYG, fint")[1] == "Tryg"
+
+
+def test_parse_note_partial_fields():
+    assert cm._parse_note("4, AC") == (4, "AC", "")
+    assert cm._parse_note("4") == (4, "", "")
+    assert cm._parse_note("4/5") == (4, "", "")
+    assert cm._parse_note("8/10") == (8, "", "")
+    assert cm._parse_note("") == (None, "", "")
+
+
+def test_parse_note_keeps_commas_inside_the_comment():
+    assert cm._parse_note("4, AC, godt, men træt") == (4, "AC", "godt, men træt")
+
+
+def test_parse_note_without_a_leading_rating_is_all_comment():
+    # Prose with a comma must never name a gym.
+    assert cm._parse_note("god træning, lidt træt") == (
+        None, "", "god træning, lidt træt")
+    assert cm._parse_note("Tryg m Peter") == (None, "", "Tryg m Peter")
+    assert cm._parse_note("lynild") == (None, "", "lynild")
+    assert cm._parse_note("4 m Silas, AC") == (None, "", "4 m Silas, AC")
+    assert cm._parse_note("0, AC") == (None, "", "0, AC")   # out of the 1-10 range
+
+
+def test_canonical_place():
+    assert cm._canonical_place("ac") == "AC"
+    assert cm._canonical_place("Tryg") == "Tryg"
+    assert cm._canonical_place("hjemme") == "hjemme"
+    assert cm._canonical_place("") == ""
 
 
 def test_detect_ensamble():
@@ -85,7 +109,7 @@ def test_abs_is_mave_not_cardio(make_workout):
 
 
 def test_row_shape_and_types(make_workout):
-    w = make_workout(title="Skub", description="4 m Silas, AC",
+    w = make_workout(title="Skub", description="4, AC, m Silas",
                      exercises=[strength_ex()])
     row = cm.workout_to_row(w)
     assert row["Date"] == date(2026, 7, 4)
@@ -94,7 +118,7 @@ def test_row_shape_and_types(make_workout):
     assert isinstance(row["Rating"], int)
     assert row["Ensamble"] == 1
     assert row["Place"] == "AC"
-    assert row["Comments"] == "4 m Silas, AC"
+    assert row["Comments"] == "m Silas"
     assert set(row.keys()) == {
         "Date", "Place", "Type", "Time", "Mave", "AddCardio",
         "AddCardio2", "Ensamble", "Rating", "Claude", "Comments"}

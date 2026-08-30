@@ -19,11 +19,15 @@ _TYPE_MAP = {
     "skub": "push",
 }
 
-# Known gym names to detect in a note, in priority order. Output is canonical.
+# Gym names with a fixed spelling in the sheet. Anything else is kept verbatim.
 _PLACES = ("AC", "Center", "Tryg")
 
 # Danish "with" marker (m / m. / med) followed by a capitalized name.
 _ENSAMBLE_RE = re.compile(r"\b(?:med|m\.?)\s+([A-ZÆØÅ][\wÆØÅæøå]+)")
+
+# The anchors are the point: field 1 must be a rating and nothing else. Without
+# them, prose that happens to contain a comma would put its tail in Place.
+_RATING_FIELD = re.compile(r"^(\d{1,2})(?:\s*/\s*(?:5|6|10))?$")
 
 
 def _map_type(title: str) -> str:
@@ -31,31 +35,34 @@ def _map_type(title: str) -> str:
     return _TYPE_MAP.get(t.lower(), t)
 
 
-def _parse_rating(description):
-    if not description:
-        return None
-    # "4/5" or "8/10"
-    m = re.search(r"\b(\d+)\s*/\s*(5|10)\b", description)
-    if m:
-        return int(m.group(1))
-    # Standalone digit 1-10 at start of string ("4 god træning")
-    m = re.match(r"^\s*(\d{1,2})\b", description)
-    if m and 1 <= int(m.group(1)) <= 10:
-        return int(m.group(1))
-    # Standalone digit 1-10 at end of string ("god træning 4")
-    m = re.search(r"\b(\d{1,2})\s*$", description)
-    if m and 1 <= int(m.group(1)) <= 10:
-        return int(m.group(1))
-    return None
-
-
-def _detect_place(description: str) -> str:
-    if not description:
-        return ""
+def _canonical_place(text: str) -> str:
+    """Known gyms get their sheet spelling; anything else is kept as typed."""
     for p in _PLACES:
-        if re.search(rf"\b{re.escape(p)}\b", description, re.IGNORECASE):
+        if text.lower() == p.lower():
             return p
-    return ""
+    return text
+
+
+def _parse_note(description: str) -> tuple:
+    """Split a note written as "rating, place, comment" into its three parts.
+
+    The convention only engages when the first field is a bare rating. Any other
+    note — no commas, or prose that merely contains one — is a comment in full,
+    which is what stops "god træning, lidt træt" from naming a gym.
+    """
+    if not description:
+        return None, "", ""
+
+    fields = [f.strip() for f in description.split(",")]
+    m = _RATING_FIELD.match(fields[0])
+    if not m or not 1 <= int(m.group(1)) <= 10:
+        return None, "", description
+
+    rating = int(m.group(1))
+    place = _canonical_place(fields[1]) if len(fields) > 1 else ""
+    # Rejoined, so a comma inside the comment survives the split.
+    comment = ", ".join(fields[2:])
+    return rating, place, comment
 
 
 def _detect_ensamble(description: str) -> int:
@@ -100,6 +107,7 @@ def workout_to_row(workout: dict) -> dict:
 
     exercises = workout.get("exercises", [])
     description = (workout.get("description") or "").strip()
+    rating, place, comment = _parse_note(description)
 
     has_cardio = any(_is_cardio_exercise(ex) for ex in exercises)
     has_strength = any(not _is_cardio_exercise(ex) for ex in exercises)
@@ -113,14 +121,14 @@ def workout_to_row(workout: dict) -> dict:
 
     return {
         "Date": start.date(),
-        "Place": _detect_place(description),
+        "Place": place,
         "Type": _map_type(workout.get("title")),
         "Time": time,
         "Mave": 1 if _has_abs(exercises) else 0,
         "AddCardio": add_cardio,
         "AddCardio2": 0,
         "Ensamble": _detect_ensamble(description),
-        "Rating": _parse_rating(description),
+        "Rating": rating,
         "Claude": 1,
-        "Comments": description,
+        "Comments": comment,
     }

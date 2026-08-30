@@ -50,20 +50,6 @@ def test_collect_new_rows_sorted_oldest_first_and_mapped(monkeypatch):
     assert all(r["Claude"] == 1 for r in rows)
 
 
-def test_collect_fix_changes_dry_run_previews_without_writing(monkeypatch, tmp_book):
-    async def fake(since):
-        return [_wk("2026-06-14", "Over", "3")]
-    monkeypatch.setattr(sync_core.hevy_client, "fetch_workouts_since", fake)
-    changes = asyncio.run(sync_core.collect_fix_changes(dry_run=True))
-    assert len(changes) == 1
-    rn, d, before, after = changes[0]
-    assert before["Type"] == "Over"
-    assert after["Type"] == "upper"
-    # dry run: sheet unchanged
-    wb = openpyxl.load_workbook(tmp_book)
-    assert wb["Træning"].cell(row=2, column=3).value == "Over"
-
-
 def test_collect_calendar_ends_on_the_week_containing_today(monkeypatch):
     async def fake(since):
         return []

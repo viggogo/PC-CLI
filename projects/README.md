@@ -9,3 +9,4 @@ Folder names are lowercase kebab-case (e.g. `disk-report`, `wifi-switch`).
 
 - [`hevy`](hevy/) — sync Hevy workouts into `Træning.xlsx`.
 - [`lidaction`](lidaction/) — set what closing the laptop lid does (AC and DC).
+- [`study`](study/) — open the Literature repo in VS Code.

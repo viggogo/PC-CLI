@@ -35,8 +35,6 @@ become a global command.
 hevy preview          Show new workouts as a table. Never writes, never asks.
 hevy sync             Show the same table, then ask before adding them.
 hevy sync -y          Add without asking.
-hevy fix              Show before → after for tool-written rows, then ask.
-hevy fix -y           Apply the corrections without asking.
 hevy --weeks N        Show the last N weeks of training as a calendar.
 hevy --weeks N -1     Same, but drop the current, unfinished week.
 hevy --help           Show usage. Also: hevy sync --help, etc.
@@ -47,7 +45,7 @@ Options:
 ```
 --since YYYY-MM-DD    (preview, sync) Override the start date.
                       Default = everything after your last Excel row.
--y, --yes             (sync, fix) Skip the confirmation prompt.
+-y, --yes             (sync) Skip the confirmation prompt.
 --weeks N             Whole number of weeks, 1–52. Required — there is no
                       default. Reads the API only; never opens the workbook.
 -1                    (--weeks) Drop the current, unfinished week. Nothing
@@ -55,21 +53,23 @@ Options:
                       is a usage error — it would leave nothing to show.
 ```
 
-**Close Excel before any command that writes** (`sync`, `fix`). Excel holds a lock
-on the file; the tool reports this rather than failing halfway.
+**Close Excel before `sync`**, the one command that writes. Excel holds a lock on
+the file; the tool reports this rather than failing halfway. `sync` only ever
+appends new rows — nothing already in the sheet is touched.
 
-Typical run:
+Typical run — the two workouts were noted in Hevy as `4, AC, god træning` and
+`5, Center, med Anders`:
 
 ```
 > hevy preview
 2 new workout(s):
-  2026-08-02  push         62 min  AC:0  Mave:1  Ens:0  R:4  AC      4 god træning
-  2026-08-05  legs         71 min  AC:12 Mave:0  Ens:1  R:5  Center  5 med Anders
+  2026-08-02  push         62 min  AC:0  Mave:1  Ens:0  R:4  AC      god træning
+  2026-08-05  legs         71 min  AC:12 Mave:0  Ens:1  R:5  Center  med Anders
 
 > hevy sync
 2 new workout(s):
-  2026-08-02  push         62 min  AC:0  Mave:1  Ens:0  R:4  AC      4 god træning
-  2026-08-05  legs         71 min  AC:12 Mave:0  Ens:1  R:5  Center  5 med Anders
+  2026-08-02  push         62 min  AC:0  Mave:1  Ens:0  R:4  AC      god træning
+  2026-08-05  legs         71 min  AC:12 Mave:0  Ens:1  R:5  Center  med Anders
 
 Add 2 workout(s) to Excel? [y/N] y
 Added 2 row(s).
@@ -98,6 +98,39 @@ The calendar:
 ```
 
 Exit codes: `0` success, `1` runtime failure, `2` usage error.
+
+## The note convention
+
+The description you write on a workout in Hevy fills three columns, read by
+position:
+
+```
+<rating>, <place>, <comment>
+```
+
+| Note in Hevy | Rating | Place | Comments |
+|---|---|---|---|
+| `4, AC, godt tempo` | 4 | `AC` | `godt tempo` |
+| `4, sats, tungt i dag` | 4 | `sats` | `tungt i dag` |
+| `4, ac, fint` | 4 | `AC` | `fint` |
+| `4, AC` | 4 | `AC` | *(blank)* |
+| `4` — also `4/5`, `8/10` | 4 | *(blank)* | *(blank)* |
+| `4, AC, godt, men træt` | 4 | `AC` | `godt, men træt` |
+| `god træning, lidt træt` | *(blank)* | *(blank)* | `god træning, lidt træt` |
+| *(empty)* | *(blank)* | *(blank)* | *(blank)* |
+
+The convention only engages when the **first field is a bare rating** — `4`,
+`4/5`, `4/6` or `8/10`, value 1–10 and nothing else in that field. Any other note
+is a comment in full, commas included; that is what stops ordinary prose like
+`god træning, lidt træt` from writing `lidt træt` into the Place column.
+
+**Place is free-form**: type any gym and it lands in the sheet as written. The
+three names the sheet already uses — `AC`, `Center`, `Tryg` — are recognised
+case-insensitively and normalised to that spelling, so `ac` still reads `AC`.
+
+Everything from the third field on is the comment, so commas inside it survive.
+The rating and place are *not* repeated in the comment — they have their own
+columns.
 
 ## Configuration
 
@@ -132,10 +165,10 @@ the last row in the sheet.
 
 - Danish workout titles map to the sheet's categories — `over`→`upper`,
   `ben`→`legs`, `træk`→`pull`, `skub`→`push`; anything else passes through.
-- **Rating** is dug out of the description: `4/5`, `8/10`, or a bare 1–10 at the
-  start or end (`4 god træning`).
-- **Place** is matched against `AC`, `Center`, `Tryg`.
-- **Ensamble** is 1 when the description says `med <Name>` / `m. <Name>`.
+- **Rating, Place and Comments** come from the workout note, written as three
+  comma-separated fields in that order — see [The note convention](#the-note-convention).
+- **Ensamble** is 1 when the note says `med <Name>` / `m. <Name>`, wherever in the
+  note that sits.
 - **Mave** is 1 when any exercise looks like core work (plank, crunch, leg raise…).
   Core work is never counted as cardio, even though it is timed and weightless.
 - **AddCardio** collects minutes from timed, load-free exercises, and those minutes
@@ -190,14 +223,16 @@ Two sessions on one day stack inside the cell, and each week is only as tall as
 its own busiest day. Names longer than 9 characters are truncated to the cell
 width. `--weeks` never opens the workbook, so it works with Excel still open.
 
-`hevy fix` re-fetches and re-maps rows from **2026-06-14 onward**
-(`sync_core.FIX_CUTOFF`) and overwrites them, matched by date. That cutoff is the
-first day the tool wrote rows — earlier rows are hand-typed and are never touched.
+`excel_writer` only ever **appends**. There is no command that rewrites an
+existing row — an earlier `hevy fix`, which re-mapped rows from 2026-06-14 onward
+in place, has been removed. Rows already in the sheet keep whatever they were
+written with, including notes that predate the comma convention; to correct one,
+edit it in Excel.
 
 ## MCP server
 
-`hevy_mcp.server` exposes `preview_workouts`, `sync_workouts`, `add_single_workout`
-and `fix_synced_rows` over MCP, sharing the same `sync_core` pipeline as the CLI.
+`hevy_mcp.server` exposes `preview_workouts`, `sync_workouts` and
+`add_single_workout` over MCP, sharing the same `sync_core` pipeline as the CLI.
 
 `mcp` is pinned to `<2` in `pyproject.toml`: version 2.0 replaced `FastMCP` with
 `MCPServer`, and `server.py` is written against the 1.x API. Porting it is an open
@@ -215,7 +250,7 @@ claude mcp add hevy -- "C:\Users\viggo\Git Clone\PC-CLI\projects\hevy\.venv\Scri
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-80 tests, all offline — the Hevy API is stubbed and the Excel tests build a tiny
+93 tests, all offline — the Hevy API is stubbed and the Excel tests build a tiny
 throwaway workbook in a temp folder. **Nothing touches your real spreadsheet.**
 
 ## Origin
