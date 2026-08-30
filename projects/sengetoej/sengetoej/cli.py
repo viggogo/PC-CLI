@@ -120,7 +120,78 @@ def cmd_last(count: int) -> int:
 
 
 def cmd_new(value: str, assume_yes: bool) -> int:
-    raise NotImplementedError  # Task 8
+    try:
+        when = parse_date(value) if value else today()
+    except BadDate:
+        print(f"Fejl: {value!r} er ikke en gyldig dato. Brug dd/mm/yyyy.",
+              file=sys.stderr)
+        return 2
+
+    if when > today():
+        print(f"Fejl: {fmt_date(when)} ligger i fremtiden.", file=sys.stderr)
+        return 2
+
+    load_env()
+    path, tab = excel_path(), sheet_name()
+
+    # ~6.5s on the real workbook, and ~8.5s more to save. Say so, or it
+    # looks hung.
+    print("Åbner regnearket ...")
+    try:
+        wb, ws = sheet.open_for_write(path, tab)
+    except FileNotFoundError:
+        print(f"Fejl: filen findes ikke: {path}", file=sys.stderr)
+        return 1
+    except sheet.SheetMissing:
+        print(f"Fejl: arket {tab!r} findes ikke i {path}", file=sys.stderr)
+        return 1
+
+    if not sheet.has_cli_column(ws):
+        wb.close()
+        print(f'Fejl: kolonnen "{sheet.CLI_HEADER}" mangler i Table2.\n'
+              f"Kør migreringen først:\n"
+              f"  .\\.venv\\Scripts\\python.exe -m sengetoej.migrate",
+              file=sys.stderr)
+        return 1
+
+    dates, next_row = sheet.dates_and_next_row(ws)
+
+    # Order matters: a date that is both a duplicate and the last entry must
+    # report as a duplicate, not as out of order.
+    if when in dates:
+        wb.close()
+        print(f"Fejl: {fmt_date(when)} findes allerede i arket.", file=sys.stderr)
+        return 2
+
+    if dates and when < dates[-1]:
+        wb.close()
+        print(f"Fejl: {fmt_date(when)} ligger før sidste række "
+              f"({fmt_date(dates[-1])}).\n"
+              f"Arket skal være i stigende rækkefølge — tilføj den i Excel.",
+              file=sys.stderr)
+        return 2
+
+    if dates:
+        interval = f"{(when - dates[-1]).days} dage siden sidste skift"
+    else:
+        interval = "første registrering"
+
+    if not assume_yes:
+        answer = input(f"Tilføj {fmt_date(when)}? ({interval}) [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            wb.close()
+            print("Afbrudt.")
+            return 0
+
+    sheet.append_entry(ws, when, next_row)
+    try:
+        sheet.save(wb, path)
+    except sheet.WorkbookLocked:
+        print("Fejl: Luk Excel og prøv igen.", file=sys.stderr)
+        return 1
+
+    print(f"Tilføjet i række {next_row}.")
+    return 0
 
 
 def main(argv=None) -> int:
