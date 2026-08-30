@@ -63,7 +63,7 @@ Sidste skift: 22/08/2026 (8 dage siden)
 > sengetoej --new
 Åbner regnearket ...
 Tilføj 30/08/2026? (8 dage siden sidste skift) [y/N] y
-Tilføjet i række 75.
+Tilføjet i række 74.
 
 > sengetoej --new 15/08/2026
 Åbner regnearket ...
