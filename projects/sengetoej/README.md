@@ -78,8 +78,8 @@ row, all the way to the sheet's last row). `--new` prints
 hang.
 
 Exit codes: `0` success, `1` runtime failure (missing file, missing sheet,
-workbook locked), `2` usage error (bad date, future date, duplicate date,
-out-of-order date, `-y` without `--new`).
+missing `cli` column, workbook locked), `2` usage error (bad date, future
+date, duplicate date, out-of-order date, `-y` without `--new`).
 
 ## Configuration
 
