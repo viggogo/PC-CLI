@@ -16,6 +16,16 @@ def test_scan_stops_at_a_run_of_blanks_and_reports_the_first_empty_row():
     assert first_empty == 4
 
 
+def test_scan_reports_first_empty_row_five_after_three_dates():
+    # Rows 2, 3, and 4 hold the dates, so row 5 is the first empty one --
+    # the exact shape of pre_migration_book / post_migration_book.
+    values = [dt.datetime(2026, 1, 1), dt.datetime(2026, 1, 15),
+              dt.datetime(2026, 2, 3)] + [None] * 200
+    dates, first_empty = sheet.scan(values)
+    assert dates == [dt.date(2026, 1, 1), dt.date(2026, 1, 15), dt.date(2026, 2, 3)]
+    assert first_empty == 5
+
+
 def test_scan_tolerates_a_gap_shorter_than_the_blank_run():
     values = [dt.datetime(2026, 1, 1)] + [None] * 5 + [dt.datetime(2026, 2, 3)] + [None] * 200
     dates, first_empty = sheet.scan(values)
@@ -57,6 +67,22 @@ def test_read_dates_on_a_sheet_with_no_entries(tmp_path):
 def test_read_dates_reports_a_missing_sheet(pre_migration_book):
     with pytest.raises(sheet.SheetMissing):
         sheet.read_dates(pre_migration_book, "Findes Ikke")
+
+
+def test_read_dates_releases_the_workbook_when_the_sheet_is_missing(pre_migration_book):
+    # A leaked handle locks the file on Windows, and this tool's whole
+    # locking story depends on never holding one. Deleting the file is the
+    # cheapest proof the handle is gone.
+    with pytest.raises(sheet.SheetMissing):
+        sheet.read_dates(pre_migration_book, "Findes Ikke")
+    pre_migration_book.unlink()
+    assert not pre_migration_book.exists()
+
+
+def test_read_dates_releases_the_workbook_on_success(pre_migration_book):
+    sheet.read_dates(pre_migration_book, SHEET)
+    pre_migration_book.unlink()
+    assert not pre_migration_book.exists()
 
 
 def test_gaps_gives_none_for_the_first_entry():
