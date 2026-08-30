@@ -93,7 +93,35 @@ def test_save_reports_a_locked_workbook(post_migration_book, monkeypatch):
     with pytest.raises(sheet.WorkbookLocked):
         sheet.save(wb, post_migration_book)
 
+    # save() must close the handle even on the WorkbookLocked path -- a
+    # leaked handle would make this unlink() raise on Windows.
+    post_migration_book.unlink()
+    assert not post_migration_book.exists()
+
 
 def test_open_for_write_reports_a_missing_sheet(post_migration_book):
     with pytest.raises(sheet.SheetMissing):
         sheet.open_for_write(post_migration_book, "Findes Ikke")
+
+    # open_for_write must close the handle even on the SheetMissing path --
+    # a leaked handle would make this unlink() raise on Windows.
+    post_migration_book.unlink()
+    assert not post_migration_book.exists()
+
+
+def test_dates_and_next_row_on_header_only_sheet(header_only_book):
+    wb, ws = sheet.open_for_write(header_only_book, SHEET)
+    dates, next_row = sheet.dates_and_next_row(ws)
+    assert dates == []
+    assert next_row == sheet.FIRST_DATA_ROW
+
+
+def test_append_at_first_data_row_does_not_copy_the_header_format(header_only_book):
+    wb, ws = sheet.open_for_write(header_only_book, SHEET)
+    header_format = ws["A1"].number_format
+    sheet.append_entry(ws, dt.date(2026, 3, 1), sheet.FIRST_DATA_ROW)
+    sheet.save(wb, header_only_book)
+
+    ws2 = openpyxl.load_workbook(header_only_book)[SHEET]
+    assert ws2["A2"].value == dt.datetime(2026, 3, 1)
+    assert ws2["A2"].number_format != header_format

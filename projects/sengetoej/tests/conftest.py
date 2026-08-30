@@ -112,6 +112,27 @@ def post_migration_book(tmp_path):
     return path
 
 
+@pytest.fixture
+def header_only_book(tmp_path):
+    """Three-column Table2 with cli in C, but zero data rows.
+
+    The state a brand-new sheet is in before its first-ever entry: row 1 is
+    the header, row 2 (FIRST_DATA_ROW) is blank. Exercises the FIRST_DATA_ROW
+    edge case where "the row above" is the header, not a data row.
+    """
+    path = tmp_path / "header_only.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = SHEET
+    ws["A1"] = "Date"
+    ws["B1"] = "Diff"
+    ws["C1"] = "cli"
+    _write_comments(ws, 5)
+    _add_table(ws, f"A1:C{TABLE_BOTTOM}", ["Date", "Diff", "cli"])
+    wb.save(path)
+    return path
+
+
 @pytest.fixture(autouse=True)
 def never_touch_the_real_workbook(tmp_path, monkeypatch):
     """Point the tool's config at a throwaway path for EVERY test.

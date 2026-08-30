@@ -130,9 +130,13 @@ def append_entry(ws, when: dt.date, row: int) -> None:
     """
     target = ws.cell(row, DATE_COL)
     target.value = dt.datetime(when.year, when.month, when.day)
-    above = ws.cell(row - 1, DATE_COL)
-    if above.value is not None:
-        target.number_format = above.number_format
+    # Only copy from a preceding DATA row. At FIRST_DATA_ROW the row above is
+    # the header, whose format is meaningless here -- copying its General
+    # format onto a date cell renders the date as a serial number.
+    if row - 1 >= FIRST_DATA_ROW:
+        above = ws.cell(row - 1, DATE_COL)
+        if above.value is not None:
+            target.number_format = above.number_format
     ws.cell(row, CLI_COL, 1)
 
 
