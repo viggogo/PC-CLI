@@ -98,6 +98,11 @@ def open_for_write(path: Path, sheet_name: str):
     """
     wb = openpyxl.load_workbook(path)
     if sheet_name not in wb.sheetnames:
+        # close() is a no-op outside read_only/write_only mode, so this cannot
+        # leak a handle and no test can pin it. Kept because it is correct
+        # and would matter if this ever moved off normal mode. The path
+        # where it IS load-bearing is read_dates(), which uses
+        # read_only=True -- see its release tests in test_sheet_read.py.
         wb.close()
         raise SheetMissing(sheet_name)
     return wb, wb[sheet_name]
@@ -146,4 +151,9 @@ def save(wb, path: Path) -> None:
     except PermissionError as exc:
         raise WorkbookLocked(path) from exc
     finally:
+        # close() is a no-op outside read_only/write_only mode, so this
+        # cannot leak a handle and no test can pin it. Kept because it is
+        # correct and would matter if this ever moved off normal mode. The
+        # path where it IS load-bearing is read_dates(), which uses
+        # read_only=True -- see its release tests in test_sheet_read.py.
         wb.close()

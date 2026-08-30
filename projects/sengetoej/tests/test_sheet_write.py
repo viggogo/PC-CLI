@@ -93,20 +93,10 @@ def test_save_reports_a_locked_workbook(post_migration_book, monkeypatch):
     with pytest.raises(sheet.WorkbookLocked):
         sheet.save(wb, post_migration_book)
 
-    # save() must close the handle even on the WorkbookLocked path -- a
-    # leaked handle would make this unlink() raise on Windows.
-    post_migration_book.unlink()
-    assert not post_migration_book.exists()
-
 
 def test_open_for_write_reports_a_missing_sheet(post_migration_book):
     with pytest.raises(sheet.SheetMissing):
         sheet.open_for_write(post_migration_book, "Findes Ikke")
-
-    # open_for_write must close the handle even on the SheetMissing path --
-    # a leaked handle would make this unlink() raise on Windows.
-    post_migration_book.unlink()
-    assert not post_migration_book.exists()
 
 
 def test_dates_and_next_row_on_header_only_sheet(header_only_book):
