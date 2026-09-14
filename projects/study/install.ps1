@@ -51,7 +51,7 @@ Write-Host ''
 # A new TAB is not enough: terminals inherit their environment from the host
 # process, so a tab opened in an already-running VS Code or Windows Terminal
 # still carries the old PATH and reports "study is not recognized".
-Write-Host 'Fully quit and relaunch your terminal app, then run:  study --begin'
+Write-Host 'Fully quit and relaunch your terminal app, then run:  study --read'
 Write-Host ''
 Write-Host 'Or refresh this session without restarting anything:'
 Write-Host '  $env:Path = [Environment]::GetEnvironmentVariable(''Path'',''Machine'') + '';'' + [Environment]::GetEnvironmentVariable(''Path'',''User'')'
