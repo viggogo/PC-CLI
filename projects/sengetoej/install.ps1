@@ -38,8 +38,11 @@ if ($LASTEXITCODE -ne 0) { throw 'pip self-upgrade failed' }
 & $venvPy -m pip install --editable "$root[dev]" --quiet
 if ($LASTEXITCODE -ne 0) { throw 'pip install failed' }
 
-$exe = Join-Path $venv 'Scripts\sengetoej.exe'
-if (-not (Test-Path $exe)) { throw "install finished but $exe is missing" }
+# Smoke-check the interpreter the shim actually uses, not Scripts\sengetoej.exe.
+# pip still creates that launcher under WDAC -- only running it is blocked -- so
+# a Test-Path on it would report success for a tool that cannot start.
+& $venvPy -P -c "import sengetoej.cli"
+if ($LASTEXITCODE -ne 0) { throw 'install finished but the package will not import' }
 
 # --- 3. .env -----------------------------------------------------------------
 # Optional here: both settings have working defaults in code.

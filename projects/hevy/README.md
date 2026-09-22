@@ -29,6 +29,14 @@ Only `bin\hevy.cmd` is exposed, never the project folder itself — PowerShell
 resolves `.ps1` from `PATH` ahead of `PATHEXT`, so `install.ps1` would otherwise
 become a global command.
 
+That shim runs `.venv\Scripts\python.exe -m hevy_mcp`, not the `hevy.exe` pip
+generates alongside it. The pip launcher is unsigned — it's a stub with the entry
+point appended as a zip, so its hash is unique to each install and can never carry
+a signature — and this machine enforces WDAC (Device Guard), which blocks it
+outright. `python.exe` is signed by the Python Software Foundation, so going
+through it works and needs no policy exception. Same reason the commands below
+spell out `python.exe -m`.
+
 ## Usage
 
 ```
@@ -241,7 +249,7 @@ job — until then, unpinning breaks the server (the CLI is unaffected).
 It is **not registered anywhere** right now. To wire it into Claude Code:
 
 ```powershell
-claude mcp add hevy -- "C:\Users\viggo\Git Clone\PC-CLI\projects\hevy\.venv\Scripts\hevy-mcp.exe"
+claude mcp add hevy -- "C:\Users\viggo\Git Clone\PC-CLI\projects\hevy\.venv\Scripts\python.exe" -P -m hevy_mcp.server
 ```
 
 ## Tests

@@ -38,8 +38,11 @@ if ($LASTEXITCODE -ne 0) { throw 'pip self-upgrade failed' }
 & $venvPy -m pip install --editable $root --quiet
 if ($LASTEXITCODE -ne 0) { throw 'pip install failed' }
 
-$exe = Join-Path $venv 'Scripts\hevy.exe'
-if (-not (Test-Path $exe)) { throw "install finished but $exe is missing" }
+# Smoke-check the interpreter the shim actually uses, not Scripts\hevy.exe.
+# pip still creates that launcher under WDAC -- only running it is blocked -- so
+# a Test-Path on it would report success for a tool that cannot start.
+& $venvPy -P -c "import hevy_mcp.cli"
+if ($LASTEXITCODE -ne 0) { throw 'install finished but the package will not import' }
 
 # --- 3. .env -----------------------------------------------------------------
 # Never overwrite an existing .env -- it holds the API key.
