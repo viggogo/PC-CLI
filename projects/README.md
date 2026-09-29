@@ -7,6 +7,7 @@ Folder names are lowercase kebab-case (e.g. `disk-report`, `wifi-switch`).
 
 ## Tools
 
+- [`batprotect`](batprotect/) — turn Samsung Battery protection on/off and set its charge limit.
 - [`hevy`](hevy/) — sync Hevy workouts into `Træning.xlsx`.
 - [`lidaction`](lidaction/) — set what closing the laptop lid does (AC and DC).
 - [`study`](study/) — open the Literature (`--read`) or latex (`--write`) repo in VS Code.
